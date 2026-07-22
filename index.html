@@ -16,6 +16,7 @@ const layer=L.geoJSON(areas,{style:f=>({color:'#667085',weight:1.3,fillColor:f.p
 map.fitBounds(layer.getBounds(),{padding:[35,35]});
 map.on('preclick',()=>map.closePopup());
 function updatePostcodeLabels(){const show=staticMode||map.getZoom()>=12;postcodeLayers.forEach(l=>show?l.openTooltip():l.closeTooltip());}
-map.on('zoomend',updatePostcodeLabels);updatePostcodeLabels();
+function updateBoundaryWeight(){layer.setStyle({weight:map.getZoom()>=12?2.6:1.3});}
+map.on('zoomend',()=>{updatePostcodeLabels();updateBoundaryWeight();});updatePostcodeLabels();updateBoundaryWeight();
 const legend=L.control({position:'bottomright'});legend.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML='<span class="sw" style="background:#D92D20"></span>Standard&nbsp;&nbsp;&nbsp;<span class="sw" style="background:#F79009"></span>Additional charge';return d};legend.addTo(map);
 </script></body></html>
