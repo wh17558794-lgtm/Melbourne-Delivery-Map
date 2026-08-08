@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Melbourne Delivery Area</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     html,body,#map{height:100%;margin:0}
     body{font-family:Arial,sans-serif;background:#eef2f6}
@@ -15,23 +14,119 @@
     .sw{display:inline-block;width:18px;height:13px;margin-right:7px;border:1px solid #667085;vertical-align:-2px}
     .leaflet-tooltip.pc{background:transparent;border:0;box-shadow:none;padding:0;color:#fff;font-weight:700;font-size:10px;line-height:1;text-shadow:-1px -1px 1px #344054,1px -1px 1px #344054,-1px 1px 1px #344054,1px 1px 1px #344054;white-space:nowrap}
     .leaflet-tooltip.pc:before{display:none}
+    .leaflet-tooltip.address-index{display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin:0;padding:0 3px;border:2px solid #fff;border-radius:11px;background:#175cd3;color:#fff;box-shadow:0 1px 4px rgba(16,24,40,.35);font-size:10px;font-weight:700;line-height:1}
+    .leaflet-tooltip.address-index:before{display:none}
     .leaflet-popup-content{line-height:1.45}
-    .static-map .leaflet-control-zoom{display:none}
+    .search-panel{position:absolute;z-index:1050;top:76px;left:54px;width:min(420px,calc(100vw - 74px));max-height:calc(100vh - 108px);overflow:hidden;box-sizing:border-box;border:1px solid rgba(148,163,184,.45);border-radius:16px;background:rgba(255,255,255,.96);box-shadow:0 18px 48px rgba(15,23,42,.18),0 2px 8px rgba(15,23,42,.08);backdrop-filter:blur(14px);color:#0f172a}
+    .search-panel:before{content:'';position:absolute;z-index:1;top:0;right:0;left:0;height:4px;background:linear-gradient(90deg,#2563eb,#0ea5e9,#22c55e)}
+    .search-panel.collapsed{width:auto}
+    .search-panel.collapsed .search-body{display:none}
+    .search-panel.collapsed .search-heading{padding:11px 12px}
+    .search-panel.collapsed .search-icon,.search-panel.collapsed .search-subtitle{display:none}
+    .search-heading{position:relative;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 16px 14px;background:linear-gradient(135deg,rgba(239,246,255,.95),rgba(255,255,255,.92) 62%);border-bottom:1px solid #e2e8f0}
+    .search-title-wrap{display:flex;align-items:center;min-width:0;gap:11px}
+    .search-icon{display:flex;flex:0 0 38px;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:linear-gradient(145deg,#2563eb,#1d4ed8);box-shadow:0 6px 14px rgba(37,99,235,.24);color:#fff}
+    .search-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .search-title-text{display:flex;min-width:0;flex-direction:column;gap:2px}
+    .search-heading strong{font-size:16px;line-height:1.25;letter-spacing:.01em}
+    .search-subtitle{overflow:hidden;color:#64748b;font-size:11px;line-height:1.3;text-overflow:ellipsis;white-space:nowrap}
+    .panel-toggle{display:flex;flex:0 0 30px;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid #cbd5e1;border-radius:9px;background:rgba(255,255,255,.88);box-shadow:0 1px 2px rgba(15,23,42,.04);color:#475569;font-size:18px;line-height:1;cursor:pointer;transition:.18s ease}
+    .panel-toggle:hover{border-color:#93c5fd;background:#eff6ff;color:#1d4ed8}
+    .search-body{max-height:calc(100vh - 183px);overflow:auto;padding:14px 16px 16px;scrollbar-width:thin;scrollbar-color:#94a3b8 transparent}
+    .search-help{position:relative;margin:0 0 12px;padding:9px 10px 9px 34px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#475569;font-size:11.5px;line-height:1.5}
+    .search-help:before{content:'i';position:absolute;top:10px;left:11px;display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#2563eb;color:#fff;font:700 10px/1 Arial}
+    .input-shell{overflow:hidden;border:1px solid #cbd5e1;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.04);transition:border-color .18s ease,box-shadow .18s ease}
+    .input-shell:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.13)}
+    .input-label{display:flex;align-items:center;justify-content:space-between;padding:9px 11px 7px;border-bottom:1px solid #eef2f7;color:#334155;font-size:11.5px;font-weight:700}
+    .input-count{padding:3px 8px;border-radius:999px;background:#eff6ff;color:#2563eb;font-size:10.5px;font-weight:700}
+    .search-input{display:block;width:100%;min-height:150px;max-height:300px;resize:vertical;box-sizing:border-box;padding:10px 11px;border:0;outline:0;background:#fff;color:#0f172a;font:13px/1.55 Arial,sans-serif;scrollbar-width:thin;scrollbar-color:#94a3b8 transparent}
+    .search-input::placeholder{color:#94a3b8}
+    .input-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border-top:1px solid #eef2f7;background:#f8fafc;color:#64748b;font-size:10.5px}
+    .keyboard-hint{white-space:nowrap}
+    kbd{display:inline-block;min-width:16px;padding:1px 4px;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:4px;background:#fff;color:#475569;font:10px/1.3 Arial;text-align:center}
+    .search-actions{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:9px;margin-top:12px}
+    .boundary-toggle{width:100%;margin-top:9px;border-color:#d6b978!important;background:#fffbeb!important;color:#7a4e00!important;box-shadow:0 1px 3px rgba(122,78,0,.08)!important}
+    .boundary-toggle:hover:not(:disabled){border-color:#c7952d!important;background:#fff7d6!important;box-shadow:0 4px 10px rgba(122,78,0,.12)!important}
+    .boundary-toggle.active{border-color:#a66b00!important;background:#fef3c7!important;color:#664100!important;box-shadow:0 0 0 2px rgba(242,177,52,.18)!important}
+    .boundary-toggle:disabled{cursor:not-allowed!important;opacity:.52}
+    .search-button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:9px 13px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 5px 12px rgba(37,99,235,.2);color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,background .16s ease}
+    .search-button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .search-button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 16px rgba(37,99,235,.24)}
+    .search-button:active:not(:disabled){transform:translateY(0)}
+    .search-button.secondary{border-color:#cbd5e1;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.05);color:#475569}
+    .search-button.secondary:hover:not(:disabled){border-color:#94a3b8;background:#f8fafc;box-shadow:0 4px 9px rgba(15,23,42,.07)}
+    .search-button:disabled{cursor:wait;opacity:.58;transform:none}
+    .search-results{display:none;margin-top:11px;padding:11px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;color:#475569;font-size:11.5px;line-height:1.5}
+    .search-results.visible{display:block}
+    .search-results.error{border-color:#fecaca;background:#fef2f2;color:#b91c1c}
+    .result-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+    .result-metric{display:flex;min-width:0;flex-direction:column;align-items:center;padding:8px 5px;border:1px solid #dbeafe;border-radius:9px;background:#fff;text-align:center}
+    .result-metric strong{color:#1d4ed8;font-size:17px;line-height:1.1}
+    .result-metric span{margin-top:3px;color:#64748b;font-size:10px;white-space:nowrap}
+    .result-errors{max-height:112px;overflow:auto;margin:9px 0 0;padding:8px 8px 8px 25px;border:1px solid #fde68a;border-radius:9px;background:#fffbeb;color:#92400e}
+    .result-errors li+li{margin-top:4px}
+    .search-progress{height:4px;margin-top:10px;overflow:hidden;border-radius:999px;background:#dbeafe}
+    .search-progress>span{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2563eb,#0ea5e9);transition:width .2s ease}
+    .google-legend{position:absolute;z-index:1050;right:12px;bottom:28px}
+    .postcode-label{color:#fff!important;font-size:10px!important;font-weight:700!important;text-shadow:-1px -1px 1px #344054,1px -1px 1px #344054,-1px 1px 1px #344054,1px 1px 1px #344054}
+    .status.api-key-setup{top:50%;width:min(420px,calc(100vw - 44px));transform:translate(-50%,-50%);box-sizing:border-box;padding:18px;border:1px solid #bfdbfe;border-radius:14px;box-shadow:0 18px 48px rgba(15,23,42,.22);line-height:1.5}
+    .api-key-setup strong{display:block;margin-bottom:5px;color:#0f172a;font-size:16px}
+    .api-key-setup p{margin:0 0 11px;color:#64748b}
+    .api-key-row{display:flex;gap:8px}
+    .api-key-row input{min-width:0;flex:1;padding:9px 10px;border:1px solid #cbd5e1;border-radius:8px;outline:0}
+    .api-key-row input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.13)}
+    .api-key-row button{padding:9px 13px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}
+    .api-key-note{display:block;margin-top:9px;color:#64748b;font-size:10.5px}
+    .static-map .gm-bundled-control{display:none}
     @media (max-width:640px){
       .title{top:10px;padding:8px 14px;font-size:17px}
       .status{top:58px}
       .legend{font-size:12px;padding:8px 10px}
+      .search-panel{top:58px;left:10px;width:calc(100vw - 20px);max-height:calc(100vh - 76px)}
+      .search-heading{padding:14px 13px 12px}
+      .search-body{max-height:calc(100vh - 151px);padding:12px 13px 14px}
+      .search-input{min-height:125px}
     }
   </style>
 </head>
 <body>
   <div class="title">Melbourne Delivery Area</div>
-  <div class="status" id="status" role="status">Loading official postcode boundaries…</div>
+  <div class="status" id="status" role="status">Loading official postcode boundaries...</div>
+  <section class="search-panel" id="searchPanel" aria-label="Batch delivery search">
+    <div class="search-heading">
+      <div class="search-title-wrap">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+        </span>
+        <span class="search-title-text">
+          <strong>批量配送查找</strong>
+          <span class="search-subtitle">Delivery area finder</span>
+        </span>
+      </div>
+      <button class="panel-toggle" id="panelToggle" type="button" aria-label="Collapse search panel" title="收起">−</button>
+    </div>
+    <div class="search-body">
+      <p class="search-help">每行输入一个完整地址或 suburb。地址会显示编号点位；Unit、Lot、楼层和斜线前的单位号会自动忽略，只按街道门牌号检索。</p>
+      <div class="input-shell">
+        <div class="input-label"><span>地址清单</span><span class="input-count" id="inputCount">0 条</span></div>
+        <textarea class="search-input" id="searchInput" spellcheck="false" placeholder="例如：&#10;Glen Waverley&#10;21 Baker Parade, Ashburton VIC 3147&#10;8 Collins Street, Melbourne"></textarea>
+        <div class="input-footer"><span>每行输入一个地址或 suburb</span><span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 查找</span></div>
+      </div>
+      <div class="search-actions">
+        <button class="search-button" id="searchButton" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span>查找并显示</span></button>
+        <button class="search-button secondary" id="clearButton" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path></svg><span>清空</span></button>
+      </div>
+      <button class="search-button secondary boundary-toggle" id="boundaryToggleButton" type="button" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z"></path><path d="M9 3v15M15 6v15"></path></svg><span id="boundaryToggleLabel">显示650个 Suburb 边界</span></button>
+      <div class="search-progress" id="searchProgress" hidden><span></span></div>
+      <div class="search-results" id="searchResults" role="status" aria-live="polite"></div>
+    </div>
+  </section>
   <div id="map" aria-label="Interactive Melbourne postcode delivery map"></div>
+  <div class="legend google-legend" id="legend"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    const VICMAP_ROOT='https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Admin/FeatureServer';
+  <script type="text/plain" id="legacyLeafletCode">
+    const VICMAP_ADMIN_ROOT='https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Admin/FeatureServer';
+    const VICMAP_ADDRESS_ROOT='https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_Address/FeatureServer';
     const zoneByPostcode={"3000":"Standard","3002":"Standard","3003":"Standard","3004":"Standard","3006":"Standard","3008":"Standard","3011":"Standard","3012":"Standard","3013":"Standard","3015":"Standard","3016":"Standard","3018":"Standard","3019":"Standard","3020":"Standard","3021":"Standard","3022":"Standard","3023":"Additional charge","3025":"Standard","3026":"Standard","3027":"Additional charge","3028":"Standard","3029":"Additional charge","3030":"Additional charge","3031":"Standard","3032":"Standard","3033":"Standard","3034":"Standard","3036":"Standard","3037":"Additional charge","3038":"Standard","3039":"Standard","3040":"Standard","3041":"Standard","3042":"Standard","3043":"Standard","3044":"Standard","3045":"Standard","3046":"Standard","3047":"Standard","3048":"Additional charge","3049":"Additional charge","3051":"Standard","3052":"Standard","3053":"Standard","3054":"Standard","3055":"Standard","3056":"Standard","3057":"Standard","3058":"Standard","3059":"Additional charge","3060":"Standard","3061":"Additional charge","3062":"Additional charge","3065":"Standard","3066":"Standard","3067":"Standard","3068":"Standard","3070":"Standard","3071":"Standard","3072":"Standard","3073":"Standard","3074":"Additional charge","3075":"Additional charge","3076":"Additional charge","3078":"Standard","3079":"Standard","3081":"Standard","3082":"Additional charge","3083":"Standard","3084":"Standard","3085":"Standard","3087":"Standard","3088":"Standard","3089":"Additional charge","3090":"Additional charge","3091":"Additional charge","3093":"Standard","3094":"Standard","3096":"Additional charge","3097":"Additional charge","3101":"Standard","3102":"Standard","3103":"Standard","3104":"Standard","3105":"Standard","3106":"Standard","3107":"Standard","3108":"Standard","3109":"Standard","3111":"Standard","3113":"Additional charge","3114":"Additional charge","3115":"Additional charge","3121":"Standard","3122":"Standard","3123":"Standard","3124":"Standard","3125":"Standard","3126":"Standard","3127":"Standard","3128":"Standard","3129":"Standard","3130":"Standard","3131":"Standard","3132":"Standard","3133":"Standard","3134":"Additional charge","3135":"Additional charge","3136":"Additional charge","3137":"Additional charge","3141":"Standard","3142":"Standard","3143":"Standard","3144":"Standard","3145":"Standard","3146":"Standard","3147":"Standard","3148":"Standard","3149":"Standard","3150":"Standard","3151":"Standard","3152":"Additional charge","3153":"Additional charge","3154":"Additional charge","3155":"Additional charge","3156":"Additional charge","3161":"Standard","3162":"Standard","3163":"Standard","3165":"Standard","3166":"Standard","3167":"Standard","3168":"Standard","3169":"Standard","3170":"Standard","3171":"Standard","3172":"Additional charge","3173":"Additional charge","3174":"Additional charge","3175":"Additional charge","3177":"Additional charge","3178":"Additional charge","3179":"Additional charge","3180":"Additional charge","3181":"Standard","3182":"Standard","3183":"Standard","3184":"Standard","3185":"Standard","3186":"Standard","3187":"Standard","3188":"Additional charge","3189":"Additional charge","3190":"Additional charge","3191":"Additional charge","3192":"Additional charge","3193":"Additional charge","3194":"Additional charge","3195":"Additional charge","3196":"Additional charge","3197":"Additional charge","3202":"Additional charge","3204":"Standard","3205":"Standard","3206":"Standard","3207":"Standard","3335":"Additional charge","3336":"Additional charge","3337":"Additional charge","3338":"Additional charge","3802":"Additional charge","3803":"Additional charge","3804":"Additional charge","3805":"Additional charge","3806":"Additional charge","3975":"Additional charge","3976":"Additional charge"};
     const postcodeBatches=[["3000","3002","3003","3004","3006","3008","3011","3012","3013","3015","3016","3018","3019","3020","3021","3022","3023","3025","3026","3027","3028","3029","3030","3031","3032","3033","3034","3036","3037","3038","3039","3040","3041","3042","3043","3044","3045","3046","3047","3048","3049","3051","3052","3053","3054"],["3055","3056","3057","3058","3059","3060","3061","3062","3065","3066","3067","3068","3070","3071","3072","3073","3074","3075","3076","3078","3079","3081","3082","3083","3084","3085","3087","3088","3089","3090","3091","3093","3094","3096","3097","3101","3102","3103","3104","3105","3106","3107","3108","3109","3111"],["3113","3114","3115","3121","3122","3123","3124","3125","3126","3127","3128","3129","3130","3131","3132","3133","3134","3135","3136","3137","3141","3142","3143","3144","3145","3146","3147","3148","3149","3150","3151","3152","3153","3154","3155","3156","3161","3162","3163","3165","3166","3167","3168","3169","3170"],["3171","3172","3173","3174","3175","3177","3178","3179","3180","3181","3182","3183","3184","3185","3186","3187","3188","3189","3190","3191","3192","3193","3194","3195","3196","3197","3202","3204","3205","3206","3207","3335","3336","3337","3338","3802","3803","3804","3805","3806","3975","3976"]];
     const localityZones={'ELTHAM':'Standard','ELTHAM NORTH':'Standard','RESEARCH':'Additional charge'};
@@ -46,36 +141,84 @@
     }).addTo(map);
 
     const statusElement=document.getElementById('status');
+    const searchPanel=document.getElementById('searchPanel');
+    const panelToggle=document.getElementById('panelToggle');
+    const searchInput=document.getElementById('searchInput');
+    const inputCount=document.getElementById('inputCount');
+    const searchButton=document.getElementById('searchButton');
+    const clearButton=document.getElementById('clearButton');
+    const searchResults=document.getElementById('searchResults');
+    const searchProgress=document.getElementById('searchProgress');
+    const searchProgressBar=searchProgress.querySelector('span');
     const postcodeLayers=[];
+    const addressMarkers=[];
+    const suburbLookup=new Map();
+    const selectedSuburbs=new Map();
+    const suburbBoundaryRequests=new Map();
+    const suburbZoneCache=new Map();
     let layer=null;
+    let suburbLayer=null;
     let openLayer=null;
+    let searchActive=false;
+    let legendElement=null;
 
-    function buildQueryUrl(layerId,where,outFields){
-      const query=new URLSearchParams({
+    function updateInputCount(){
+      const count=searchInput.value.split(/\r?\n/).filter(line=>line.trim()).length;
+      inputCount.textContent=`${count} 条`;
+    }
+
+    function buildQueryUrl(root,layerId,parameters,format='geojson'){
+      const query=new URLSearchParams({...parameters,f:format});
+      return `${root}/${layerId}/query?${query}`;
+    }
+
+    function wait(milliseconds){
+      return new Promise(resolve=>setTimeout(resolve,milliseconds));
+    }
+
+    async function fetchService(root,layerId,parameters,format='geojson'){
+      const url=buildQueryUrl(root,layerId,parameters,format);
+      let lastError=null;
+      for(let attempt=0;attempt<3;attempt++){
+        try{
+          const response=await fetch(url);
+          if(!response.ok) throw new Error(`Vicmap request failed (${response.status})`);
+          const data=await response.json();
+          if(data.error){
+            const message=data.error.message||'Vicmap returned an error';
+            const details=(data.error.details||[]).filter(Boolean).join('; ');
+            const error=new Error(details?`${message}: ${details}`:message);
+            error.retryable=/unable to perform query|temporar|busy|timeout/i.test(error.message);
+            throw error;
+          }
+          return data;
+        }catch(error){
+          lastError=error;
+          const retryable=error.retryable||
+            /failed to fetch|network|429|50[0234]|timeout/i.test(error.message);
+          if(!retryable||attempt===2) throw error;
+          await wait(350*(attempt+1));
+        }
+      }
+      throw lastError;
+    }
+
+    function fetchAdminGeoJson(layerId,where,outFields){
+      return fetchService(VICMAP_ADMIN_ROOT,layerId,{
         where,
         outFields,
         returnGeometry:'true',
         outSR:'4326',
-        geometryPrecision:'6',
-        f:'geojson'
+        geometryPrecision:'6'
       });
-      return `${VICMAP_ROOT}/${layerId}/query?${query}`;
-    }
-
-    async function fetchGeoJson(layerId,where,outFields){
-      const response=await fetch(buildQueryUrl(layerId,where,outFields));
-      if(!response.ok) throw new Error(`Vicmap request failed (${response.status})`);
-      const data=await response.json();
-      if(data.error) throw new Error(data.error.message||'Vicmap returned an error');
-      return data;
     }
 
     async function loadAreas(){
       const postcodeRequest=Promise.all(postcodeBatches.map(batch=>{
         const values=batch.map(postcode=>`'${postcode}'`).join(',');
-        return fetchGeoJson(14,`postcode IN (${values})`,'postcode');
+        return fetchAdminGeoJson(14,`postcode IN (${values})`,'postcode');
       }));
-      const localityRequest=fetchGeoJson(11,"locality_name IN ('ELTHAM','ELTHAM NORTH','RESEARCH')",'locality_name');
+      const localityRequest=fetchAdminGeoJson(11,"locality_name IN ('ELTHAM','ELTHAM NORTH','RESEARCH')",'locality_name');
       const [postcodeCollections,localityCollection]=await Promise.all([postcodeRequest,localityRequest]);
 
       const features=postcodeCollections.flatMap(collection=>collection.features);
@@ -95,6 +238,748 @@
         features.push(feature);
       });
       return {type:'FeatureCollection',features};
+    }
+
+    function normaliseText(value){
+      return value
+        .toUpperCase()
+        .replace(/[’‘]/g,"'")
+        .replace(/[–—]/g,'-')
+        .replace(/[.,;，；、:：()[\]]+/g,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+
+    function normaliseSuburbInput(value){
+      return normaliseText(value)
+        .replace(/\b(?:VICTORIA|VIC)\b/g,' ')
+        .replace(/\b\d{4}\b/g,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+
+    function normaliseAddress(value){
+      let address=normaliseText(value)
+        .replace(/\bAUSTRALIA\b/g,' ')
+        .replace(/\bVICTORIA\b/g,' ')
+        .replace(/\bVIC\b/g,' ');
+      const roadTypes={
+        ' RD ':' ROAD ',
+        ' ST ':' STREET ',
+        ' PDE ':' PARADE ',
+        ' AVE ':' AVENUE ',
+        ' AV ':' AVENUE ',
+        ' CRES ':' CRESCENT ',
+        ' CR ':' CRESCENT ',
+        ' CT ':' COURT ',
+        ' DR ':' DRIVE ',
+        ' HWY ':' HIGHWAY ',
+        ' BLVD ':' BOULEVARD ',
+        ' PL ':' PLACE ',
+        ' TCE ':' TERRACE ',
+        ' LN ':' LANE ',
+        ' CL ':' CLOSE ',
+        ' GR ':' GROVE ',
+        ' CCT ':' CIRCUIT ',
+        ' ESP ':' ESPLANADE ',
+        ' PKWY ':' PARKWAY ',
+        ' SQ ':' SQUARE ',
+        ' TRK ':' TRACK ',
+        ' TRL ':' TRAIL '
+      };
+      address=` ${address} `;
+      Object.entries(roadTypes).forEach(([shortName,longName])=>{
+        address=address.replaceAll(shortName,longName);
+      });
+      return address.replace(/\s+/g,' ').trim();
+    }
+
+    const ROAD_TYPES=[
+      'ALLEYWAY','APPROACH','BOULEVARD','BROADWAY','CAUSEWAY','CIRCUIT',
+      'CONCOURSE','CRESCENT','CUL-DE-SAC','DISTRIBUTOR','DRIVE','ENTRANCE',
+      'ESPLANADE','EXPRESSWAY','EXTENSION','FREEWAY','FRONTAGE','GARDENS',
+      'HIGHROAD','HIGHWAY','INTERCHANGE','LANEWAY','MOTORWAY','PARKWAY',
+      'PASSAGE','PATHWAY','PROMENADE','ROADWAY','SERVICE WAY','STRAND',
+      'STREET','TERRACE','THOROUGHFARE','TOLLWAY','TRACK','TRAIL','UNDERPASS',
+      'VIADUCT','WALKWAY','ACCESS','ALLEY','ARCADE','AVENUE','BEND','CHASE',
+      'CIRCLE','CLOSE','COURT','COVE','CROSSING','DRIVEWAY','FAIRWAY','GROVE',
+      'JUNCTION','LANDING','LINK','LOOKOUT','MALL','MEWS','PARADE','PLACE',
+      'PLAZA','POINT','QUADRANT','QUAY','RESERVE','RETREAT','RIDGE','RISE',
+      'ROAD','SQUARE','STEPS','TRUNKWAY','VISTA','WHARF','WYND','AMBLE',
+      'BYWAY','COMMON','COPSE','CORNER','CORSO','COURTYARD','CROSS','DALE',
+      'DELL','DOMAIN','EDGE','ELBOW','END','FOLLOW','GAP','GARDEN','GATE',
+      'GLADE','GLEN','GRANGE','GREEN','HEIGHTS','LANE','LOOP','NOOK',
+      'OUTLOOK','PASS','PATH','POCKET','PORT','QUAYS','RAMBLE','RANGE',
+      'REACH','REST','RETURN','RIDE','RIDGEWAY','RING','ROUTE','ROW','RUN',
+      'SIDING','SLOPE','SPUR','STRIP','SUBWAY','TOP','TRIANGLE','TURN',
+      'VALE','VIEW','WADE','WALK','WAY'
+    ].sort((a,b)=>b.length-a.length);
+
+    function parseAddress(value){
+      const query=normaliseAddress(value);
+      let working=query;
+      const postcodeMatch=working.match(/\b(3\d{3})\s*$/);
+      const postcode=postcodeMatch?.[1]||'';
+      if(postcodeMatch) working=working.slice(0,postcodeMatch.index).trim();
+
+      let unitNumber=null;
+      let prefix=working.match(
+        /^(?:UNIT|APT|APARTMENT|SHOP|SUITE|FLAT)\s+[A-Z]*?(\d+)[A-Z-]*\s+/
+      );
+      if(prefix){
+        unitNumber=Number(prefix[1]);
+        working=working.slice(prefix[0].length);
+      }else{
+        prefix=working.match(/^U\s*(\d+)[A-Z-]*\s+/);
+        if(prefix){
+          unitNumber=Number(prefix[1]);
+          working=working.slice(prefix[0].length);
+        }else{
+          prefix=working.match(/^([A-Z]*?)(\d+)[A-Z-]*\s*\/\s*/);
+          if(prefix){
+            unitNumber=Number(prefix[2]);
+            working=working.slice(prefix[0].length);
+          }
+        }
+      }
+
+      working=working
+        .replace(/^LEVEL\s+[A-Z0-9-]+\s+/,'')
+        .replace(/^(?:LOT\s+[A-Z0-9-]+\s+)+/,'')
+        .trim();
+
+      const typePattern=ROAD_TYPES
+        .map(type=>type.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))
+        .join('|');
+      const match=working.match(
+        new RegExp(`^(\\d+)([A-Z]?)(?:\\s*-\\s*(\\d+)([A-Z]?))?\\s+(.+?)\\s+(${typePattern})\\b\\s*(.*)$`)
+      );
+      if(!match) return null;
+      return {
+        query,
+        unitNumber,
+        houseNumber:Number(match[1]),
+        houseSuffix:match[2]||'',
+        houseNumberEnd:match[3]?Number(match[3]):null,
+        houseSuffixEnd:match[4]||'',
+        roadName:match[5],
+        roadType:match[6],
+        locality:match[7].trim(),
+        postcode
+      };
+    }
+
+    function escapeSql(value){
+      return value.replaceAll("'","''").replace(/[%_]/g,'');
+    }
+
+    function escapeHtml(value){
+      return String(value)
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'",'&#039;');
+    }
+
+    function zoneColour(zone){
+      if(zone==='Standard') return '#D92D20';
+      if(zone==='Additional charge') return '#F79009';
+      if(zone==='Mixed') return '#7F56D9';
+      return '#98A2B3';
+    }
+
+    function suburbBoundaryWeight(){
+      const zoom=map.getZoom();
+      if(zoom>=16) return 2;
+      if(zoom>=14) return 1.6;
+      if(zoom>=12) return 1.3;
+      return 1;
+    }
+
+    function suburbStyle(feature){
+      const name=normaliseText(feature.properties.locality_name||'');
+      const selection=selectedSuburbs.get(name);
+      return {
+        renderer,
+        stroke:Boolean(selection),
+        fill:Boolean(selection),
+        color:'#475467',
+        opacity:selection ? .95 : 0,
+        weight:suburbBoundaryWeight(),
+        fillColor:selection ? zoneColour(selection.zone) : 'transparent',
+        fillOpacity:selection ? .72 : 0,
+        smoothFactor:.35,
+        lineJoin:'round'
+      };
+    }
+
+    function registerSuburbPath(feature,path){
+      const name=normaliseText(feature.properties.locality_name||'');
+      if(!suburbLookup.has(name)) suburbLookup.set(name,[]);
+      suburbLookup.get(name).push(path);
+      path.on('click',event=>{
+        if(!searchActive) return;
+        const selection=selectedSuburbs.get(name);
+        if(!selection) return;
+        if(openLayer){
+          map.closePopup();
+          openLayer=null;
+          return;
+        }
+        L.popup({closeButton:true})
+          .setLatLng(event.latlng)
+          .setContent(`<b>${escapeHtml(feature.properties.locality_name)}</b><br>${escapeHtml(selection.zone)}`)
+          .openOn(map);
+        openLayer=path;
+      });
+      path.on({
+        mouseover:()=>{if(searchActive&&selectedSuburbs.has(name)) path.setStyle({fillOpacity:selectionOpacity(),color:'#344054'})},
+        mouseout:()=>{if(searchActive) path.setStyle(suburbStyle(feature))}
+      });
+    }
+
+    function selectionOpacity(){
+      return .82;
+    }
+
+    function ensureSuburbLayer(){
+      if(suburbLayer) return;
+      suburbLayer=L.geoJSON({type:'FeatureCollection',features:[]},{
+        bubblingMouseEvents:false,
+        style:suburbStyle,
+        onEachFeature:registerSuburbPath
+      });
+    }
+
+    async function ensureSuburbBoundaries(rawNames=[]){
+      ensureSuburbLayer();
+      const names=[...new Set(
+        rawNames
+          .map(normaliseSuburbInput)
+          .filter(Boolean)
+          .filter(name=>!suburbLookup.has(name))
+      )];
+      if(!names.length) return;
+
+      const chunkSize=40;
+      const requests=[];
+      for(let start=0;start<names.length;start+=chunkSize){
+        const chunk=names.slice(start,start+chunkSize).sort();
+        const key=chunk.join('|');
+        if(!suburbBoundaryRequests.has(key)){
+          const values=chunk.map(name=>`'${escapeSql(name)}'`).join(',');
+          const request=fetchAdminGeoJson(
+            11,
+            `locality_name IN (${values})`,
+            'locality_name'
+          ).then(data=>{
+            suburbLayer.addData(data);
+            return data;
+          }).catch(error=>{
+            suburbBoundaryRequests.delete(key);
+            throw error;
+          });
+          suburbBoundaryRequests.set(key,request);
+        }
+        requests.push(suburbBoundaryRequests.get(key));
+      }
+      await Promise.all(requests);
+    }
+
+    async function ensureSpecificSuburb(rawName){
+      const requested=normaliseSuburbInput(rawName);
+      if(suburbLookup.has(requested)) return requested;
+
+      const partial=[...suburbLookup.keys()].filter(name=>name.includes(requested)||requested.includes(name));
+      if(partial.length===1) return partial[0];
+
+      const data=await fetchAdminGeoJson(
+        11,
+        `UPPER(locality_name)='${escapeSql(requested)}'`,
+        'locality_name'
+      );
+      if(!data.features?.length) return null;
+      suburbLayer.addData(data);
+      return normaliseText(data.features[0].properties.locality_name);
+    }
+
+    async function getSuburbZone(name){
+      if(localityZones[name]) return localityZones[name];
+      if(!suburbZoneCache.has(name)){
+        const request=(async()=>{
+          const data=await fetchService(VICMAP_ADDRESS_ROOT,0,{
+            where:`UPPER(locality_name)='${escapeSql(name)}'`,
+            outFields:'postcode',
+            returnGeometry:'false',
+            resultRecordCount:'200'
+          },'json');
+          const postcodes=(data.features||[])
+            .map(feature=>feature.attributes?.postcode)
+            .filter(Boolean);
+          const zones=new Set(postcodes.map(postcode=>zoneByPostcode[postcode]).filter(Boolean));
+          if(zones.size===1) return [...zones][0];
+          if(zones.size>1) return 'Mixed';
+          return 'Outside delivery area';
+        })().catch(error=>{
+          suburbZoneCache.delete(name);
+          throw error;
+        });
+        suburbZoneCache.set(name,request);
+      }
+      return suburbZoneCache.get(name);
+    }
+
+    function mergeSuburbSelection(name,zone,lineNumber){
+      const existing=selectedSuburbs.get(name);
+      if(!existing){
+        selectedSuburbs.set(name,{zone,lineNumbers:[lineNumber]});
+        return;
+      }
+      existing.lineNumbers.push(lineNumber);
+      if(existing.zone!==zone&&zone!=='Outside delivery area'&&existing.zone!=='Outside delivery area'){
+        existing.zone='Mixed';
+      }else if(existing.zone==='Outside delivery area'&&zone!=='Outside delivery area'){
+        existing.zone=zone;
+      }
+    }
+
+    function scoreAddressCandidate(feature,query,parsed){
+      const props=feature.properties||{};
+      const candidate=normaliseAddress(props.ezi_address||'');
+      let score=0;
+      if(candidate===query) score+=1000;
+      else if(candidate.startsWith(`${query} `)) score+=900;
+      const queryTokens=query.split(' ');
+      score+=queryTokens.filter(token=>candidate.includes(token)).length*10;
+      if(parsed){
+        if(Number(props.house_number_1)===parsed.houseNumber) score+=120;
+        if(normaliseText(props.road_name||'')===parsed.roadName) score+=120;
+        if(normaliseText(props.road_type||'')===parsed.roadType) score+=60;
+        if(normaliseText(props.locality_name||'')===parsed.locality) score+=100;
+        if(String(props.postcode||'')===parsed.postcode) score+=100;
+      }
+      if(props.is_primary==='Y') score+=3;
+      if(props.property_status==='A') score+=2;
+      return score;
+    }
+
+    function addressWhere(parsed,{loose=false,minimal=false}={}){
+      const parts=[`house_number_1=${parsed.houseNumber}`];
+      if(parsed.houseSuffix&&!minimal){
+        parts.push(`house_suffix_1='${escapeSql(parsed.houseSuffix)}'`);
+      }
+      if(!minimal){
+        parts.push(`road_name='${escapeSql(parsed.roadName)}'`);
+        if(!loose) parts.push(`road_type='${escapeSql(parsed.roadType)}'`);
+      }
+      if(parsed.postcode){
+        parts.push(`postcode='${escapeSql(parsed.postcode)}'`);
+      }else if(parsed.locality){
+        parts.push(`locality_name='${escapeSql(parsed.locality)}'`);
+      }
+      if(!loose&&parsed.locality&&parsed.postcode){
+        parts.push(`locality_name='${escapeSql(parsed.locality)}'`);
+      }
+      return parts.join(' AND ');
+    }
+
+    function isAddressInput(value){
+      const query=normaliseAddress(value);
+      return Boolean(parseAddress(value))||
+        /^(?:(?:UNIT|SHOP|APT|APARTMENT|SUITE|FLAT|LEVEL)\b|U\s*\d|\d)/.test(query);
+    }
+
+    async function fetchAddressCandidates(where,resultRecordCount='100'){
+      const data=await fetchService(VICMAP_ADDRESS_ROOT,0,{
+        where,
+        outFields:[
+          'ezi_address','locality_name','postcode','is_primary','property_status',
+          'house_number_1','house_number_2','house_suffix_1','road_name','road_type',
+          'num_road_address'
+        ].join(','),
+        returnGeometry:'true',
+        outSR:'4326',
+        resultRecordCount
+      });
+      return (data.features||[]).filter(feature=>feature.geometry?.coordinates);
+    }
+
+    function selectAddressCandidate(rawAddress,candidates,relaxed=false){
+      const query=normaliseAddress(rawAddress);
+      const parsed=parseAddress(rawAddress);
+      let pool=[...candidates];
+      if(parsed){
+        const sameProperty=pool.filter(feature=>{
+          const props=feature.properties||{};
+          return Number(props.house_number_1)===parsed.houseNumber&&
+            (!parsed.postcode||String(props.postcode||'')===parsed.postcode);
+        });
+        if(!sameProperty.length) return null;
+        pool=sameProperty;
+        const sameRoad=pool.filter(feature=>{
+          const props=feature.properties||{};
+          return normaliseText(props.road_name||'')===parsed.roadName&&
+            normaliseText(props.road_type||'')===parsed.roadType;
+        });
+        if(sameRoad.length) pool=sameRoad;
+        else if(!relaxed) return null;
+      }
+      pool.sort(
+        (a,b)=>scoreAddressCandidate(b,query,parsed)-scoreAddressCandidate(a,query,parsed)
+      );
+      if(!pool.length) return null;
+      const topScore=scoreAddressCandidate(pool[0],query,parsed);
+      const equallyLikely=pool.filter(
+        feature=>scoreAddressCandidate(feature,query,parsed)===topScore
+      );
+      return {
+        feature:pool[0],
+        ambiguous:new Set(equallyLikely.map(item=>item.properties.ezi_address)).size>1
+      };
+    }
+
+    function batchAddressWhere(parsed,minimal=false){
+      const parts=[`house_number_1=${parsed.houseNumber}`];
+      if(parsed.houseSuffix&&!minimal){
+        parts.push(`house_suffix_1='${escapeSql(parsed.houseSuffix)}'`);
+      }
+      if(!minimal){
+        parts.push(`road_name='${escapeSql(parsed.roadName)}'`);
+        parts.push(`road_type='${escapeSql(parsed.roadType)}'`);
+      }
+      if(parsed.postcode){
+        parts.push(`postcode='${escapeSql(parsed.postcode)}'`);
+      }else if(parsed.locality){
+        parts.push(`locality_name='${escapeSql(parsed.locality)}'`);
+      }
+      return parts.join(' AND ');
+    }
+
+    async function queryAddressChunks(items,minimal,candidates,errors){
+      const chunkSize=6;
+      const requests=[];
+      for(let start=0;start<items.length;start+=chunkSize){
+        const chunk=items.slice(start,start+chunkSize);
+        const conditions=[...new Set(
+          chunk.map(item=>`(${batchAddressWhere(item.parsed,minimal)})`)
+        )];
+        requests.push((async()=>{
+          try{
+            const found=await fetchAddressCandidates(conditions.join(' OR '),'2000');
+            candidates.push(...found);
+          }catch(error){
+            chunk.forEach(item=>errors.set(item.index,error));
+          }
+        })());
+      }
+      await Promise.all(requests);
+    }
+
+    async function geocodeAddressesBatch(items){
+      const results=new Map();
+      const parsedItems=items
+        .map(item=>({...item,parsed:parseAddress(item.input)}))
+        .filter(item=>item.parsed);
+      const unparsedItems=items.filter(
+        item=>!parsedItems.some(parsed=>parsed.index===item.index)
+      );
+      const errors=new Map();
+      const exactCandidates=[];
+      await queryAddressChunks(parsedItems,false,exactCandidates,errors);
+
+      const unmatched=[];
+      parsedItems.forEach(item=>{
+        const match=selectAddressCandidate(item.input,exactCandidates);
+        if(match) results.set(item.index,{match});
+        else unmatched.push(item);
+      });
+
+      if(unmatched.length){
+        const fallbackCandidates=[];
+        await queryAddressChunks(unmatched,true,fallbackCandidates,errors);
+        unmatched.forEach(item=>{
+          const match=selectAddressCandidate(item.input,fallbackCandidates,true);
+          if(match) results.set(item.index,{match});
+          else if(errors.has(item.index)) results.set(item.index,{error:errors.get(item.index)});
+          else results.set(item.index,{match:null});
+        });
+      }
+
+      await mapWithConcurrency(unparsedItems,3,async item=>{
+        try{
+          results.set(item.index,{match:await geocodeAddress(item.input)});
+        }catch(error){
+          results.set(item.index,{error});
+        }
+      });
+      return results;
+    }
+
+    async function geocodeAddress(rawAddress){
+      const query=normaliseAddress(rawAddress);
+      const parsed=parseAddress(rawAddress);
+      const attempts=[];
+      if(parsed){
+        attempts.push(addressWhere(parsed));
+        attempts.push(addressWhere(parsed,{loose:true}));
+        attempts.push(addressWhere(parsed,{minimal:true}));
+      }else{
+        attempts.push(`ezi_address LIKE '${escapeSql(query)}%'`);
+      }
+
+      let candidates=[];
+      let successfulRequest=false;
+      let lastError=null;
+      for(const where of [...new Set(attempts)]){
+        try{
+          candidates=await fetchAddressCandidates(where);
+          successfulRequest=true;
+          if(candidates.length) break;
+        }catch(error){
+          lastError=error;
+        }
+      }
+      if(!candidates.length&&!successfulRequest&&lastError) throw lastError;
+      return selectAddressCandidate(rawAddress,candidates,true);
+    }
+
+    async function mapWithConcurrency(items,limit,worker,onProgress){
+      const results=new Array(items.length);
+      let nextIndex=0;
+      let completed=0;
+      async function run(){
+        while(nextIndex<items.length){
+          const index=nextIndex++;
+          try{
+            results[index]=await worker(items[index],index);
+          }catch(error){
+            results[index]={ok:false,input:items[index],reason:error.message||'Search failed'};
+          }
+          completed++;
+          onProgress?.(completed,items.length);
+        }
+      }
+      await Promise.all(Array.from({length:Math.min(limit,items.length)},run));
+      return results;
+    }
+
+    function addressMarkerRadius(){
+      return Math.max(5,Math.min(15,5+(map.getZoom()-10)*1.35));
+    }
+
+    function addAddressMarker(result){
+      const [longitude,latitude]=result.feature.geometry.coordinates;
+      const props=result.feature.properties;
+      const zone=result.zone||'Outside delivery area';
+      const marker=L.circleMarker([latitude,longitude],{
+        renderer,
+        radius:addressMarkerRadius(),
+        color:'#FFFFFF',
+        weight:2.5,
+        fillColor:'#175CD3',
+        fillOpacity:1,
+        bubblingMouseEvents:false
+      }).addTo(map);
+      marker.bindTooltip(String(result.lineNumber),{
+        permanent:true,
+        direction:'center',
+        className:'address-index',
+        opacity:1
+      });
+      marker.bindPopup(
+        `<b>${result.lineNumber}. ${escapeHtml(props.ezi_address)}</b><br>`+
+        `${escapeHtml(props.locality_name)} · ${escapeHtml(props.postcode||'No postcode')}<br>`+
+        `${escapeHtml(zone)}`
+      );
+      addressMarkers.push(marker);
+      return marker;
+    }
+
+    function updateAddressMarkerSizes(){
+      addressMarkers.forEach(marker=>marker.setRadius(addressMarkerRadius()));
+    }
+
+    function updateSearchProgress(completed,total){
+      searchProgress.hidden=false;
+      searchProgressBar.style.width=`${Math.round(completed/total*100)}%`;
+    }
+
+    function setSearchResult(message,errors=[],isError=false){
+      searchResults.classList.toggle('error',isError);
+      searchResults.classList.add('visible');
+      searchResults.innerHTML=message;
+      if(errors.length){
+        const list=document.createElement('ul');
+        list.className='result-errors';
+        errors.forEach(error=>{
+          const item=document.createElement('li');
+          item.textContent=error;
+          list.appendChild(item);
+        });
+        searchResults.appendChild(list);
+      }
+    }
+
+    function updateLegend(){
+      if(!legendElement) return;
+      if(searchActive){
+        legendElement.innerHTML=
+          '<span class="sw" style="background:#D92D20"></span>Standard&nbsp;&nbsp;'+
+          '<span class="sw" style="background:#F79009"></span>Additional charge<br>'+
+          '<span class="sw" style="background:#175CD3;border-radius:50%"></span>Address';
+      }else{
+        legendElement.innerHTML=
+          '<span class="sw" style="background:#D92D20"></span>Standard&nbsp;&nbsp;&nbsp;'+
+          '<span class="sw" style="background:#F79009"></span>Additional charge';
+      }
+    }
+
+    function showSearchMode(){
+      searchActive=true;
+      if(map.hasLayer(layer)) map.removeLayer(layer);
+      if(!map.hasLayer(suburbLayer)) suburbLayer.addTo(map);
+      suburbLayer.setStyle(suburbStyle);
+      postcodeLayers.forEach(path=>path.closeTooltip());
+      updateLegend();
+    }
+
+    function fitSearchResults(){
+      const items=[...addressMarkers];
+      selectedSuburbs.forEach((_,name)=>{
+        (suburbLookup.get(name)||[]).forEach(path=>items.push(path));
+      });
+      if(!items.length) return;
+      const bounds=L.featureGroup(items).getBounds();
+      if(bounds.isValid()) map.fitBounds(bounds.pad(.12),{padding:[40,40],maxZoom:15});
+    }
+
+    function resetSearch(clearInput=true){
+      selectedSuburbs.clear();
+      addressMarkers.splice(0).forEach(marker=>map.removeLayer(marker));
+      searchActive=false;
+      if(suburbLayer&&map.hasLayer(suburbLayer)) map.removeLayer(suburbLayer);
+      if(layer&&!map.hasLayer(layer)) layer.addTo(map);
+      if(layer) layer.setStyle(featureStyle);
+      if(clearInput){
+        searchInput.value='';
+        updateInputCount();
+      }
+      searchResults.className='search-results';
+      searchResults.textContent='';
+      searchProgress.hidden=true;
+      searchProgressBar.style.width='0';
+      if(openLayer) map.closePopup();
+      openLayer=null;
+      updatePostcodeLabels();
+      updateLegend();
+      if(layer) map.fitBounds(layer.getBounds(),{padding:[35,35]});
+    }
+
+    async function runBatchSearch(){
+      const lines=searchInput.value
+        .split(/\r?\n/)
+        .map(line=>line.trim())
+        .filter(Boolean);
+      if(!lines.length){
+        setSearchResult('请先输入至少一个地址或 suburb。',[],true);
+        return;
+      }
+
+      searchButton.disabled=true;
+      clearButton.disabled=true;
+      searchProgressBar.style.width='0';
+      searchProgress.hidden=false;
+      setSearchResult(`正在处理 ${lines.length} 条信息...`);
+
+      try{
+        await ensureSuburbBoundaries();
+        selectedSuburbs.clear();
+        addressMarkers.splice(0).forEach(marker=>map.removeLayer(marker));
+
+        const addressItems=lines
+          .map((input,index)=>({input,index}))
+          .filter(item=>isAddressInput(item.input));
+        const directSuburbNames=lines
+          .filter(input=>!isAddressInput(input))
+          .map(normaliseSuburbInput);
+        const directBoundaryRequest=ensureSuburbBoundaries(directSuburbNames);
+        if(addressItems.length){
+          setSearchResult(`正在批量定位 ${addressItems.length} 个地址...`);
+        }
+        const addressMatches=await geocodeAddressesBatch(addressItems);
+        const addressSuburbNames=[...addressMatches.values()]
+          .map(result=>result.match?.feature?.properties?.locality_name)
+          .filter(Boolean);
+        await directBoundaryRequest;
+        await ensureSuburbBoundaries(addressSuburbNames);
+
+        const results=await mapWithConcurrency(lines,4,async(input,index)=>{
+          const lineNumber=index+1;
+          if(isAddressInput(input)){
+            const batchResult=addressMatches.get(index);
+            if(batchResult?.error){
+              return {ok:false,input,reason:batchResult.error.message||'地址服务查询失败'};
+            }
+            const match=batchResult?.match||null;
+            if(!match) return {ok:false,input,reason:'未找到匹配地址'};
+            const props=match.feature.properties;
+            const suburbName=await ensureSpecificSuburb(props.locality_name);
+            if(!suburbName) return {ok:false,input,reason:'找到地址，但未找到 suburb 边界'};
+            const zone=props.postcode==='3095'
+              ?localityZones[suburbName]
+              :zoneByPostcode[props.postcode]||'Outside delivery area';
+            mergeSuburbSelection(suburbName,zone,lineNumber);
+            return {
+              ok:true,
+              type:'address',
+              input,
+              lineNumber,
+              feature:match.feature,
+              suburbName,
+              zone,
+              ambiguous:match.ambiguous
+            };
+          }
+
+          const suburbName=await ensureSpecificSuburb(input);
+          if(!suburbName) return {ok:false,input,reason:'未找到匹配 suburb'};
+          const zone=await getSuburbZone(suburbName);
+          mergeSuburbSelection(suburbName,zone,lineNumber);
+          return {ok:true,type:'suburb',input,lineNumber,suburbName,zone};
+        },updateSearchProgress);
+
+        showSearchMode();
+        results.filter(result=>result?.ok&&result.type==='address').forEach(addAddressMarker);
+        suburbLayer.setStyle(suburbStyle);
+        fitSearchResults();
+        updateAddressMarkerSizes();
+
+        const addressCount=results.filter(result=>result?.ok&&result.type==='address').length;
+        const suburbCount=results.filter(result=>result?.ok&&result.type==='suburb').length;
+        const failures=results.filter(result=>!result?.ok);
+        const warnings=results.filter(result=>result?.ambiguous);
+        const issues=[
+          ...failures.map(result=>`${result.input} — ${result.reason}`),
+          ...warnings.map(result=>`${result.input} — 有多个相近结果，已显示最佳匹配`)
+        ];
+        setSearchResult(
+          '<div class="result-summary-grid">'+
+            `<div class="result-metric"><strong>${addressCount}</strong><span>地址点</span></div>`+
+            `<div class="result-metric"><strong>${suburbCount}</strong><span>Suburb</span></div>`+
+            `<div class="result-metric"><strong>${selectedSuburbs.size}</strong><span>高亮区域</span></div>`+
+          '</div>',
+          issues,
+          failures.length===lines.length
+        );
+      }catch(error){
+        console.error(error);
+        setSearchResult(`搜索失败：${escapeHtml(error.message||'Unknown error')}`,[],true);
+      }finally{
+        searchButton.disabled=false;
+        clearButton.disabled=false;
+        searchProgress.hidden=true;
+      }
     }
 
     function boundaryWeight(){
@@ -151,12 +1036,14 @@
     }
 
     function updatePostcodeLabels(){
-      const show=staticMode||map.getZoom()>=12;
+      const show=!searchActive&&(staticMode||map.getZoom()>=12);
       postcodeLayers.forEach(path=>show?path.openTooltip():path.closeTooltip());
     }
 
     function updateBoundaryWeight(){
       if(layer) layer.setStyle(featureStyle);
+      if(suburbLayer) suburbLayer.setStyle(suburbStyle);
+      updateAddressMarkerSizes();
     }
 
     async function initialise(){
@@ -179,6 +1066,9 @@
         map.on('popupclose',()=>{openLayer=null});
         updatePostcodeLabels();
         statusElement.hidden=true;
+        searchButton.disabled=false;
+        clearButton.disabled=false;
+        ensureSuburbLayer();
       }catch(error){
         console.error(error);
         statusElement.textContent='Official boundary data could not be loaded. Please refresh to try again.';
@@ -189,12 +1079,34 @@
 
     const legend=L.control({position:'bottomright'});
     legend.onAdd=()=>{
-      const element=L.DomUtil.create('div','legend');
-      element.innerHTML='<span class="sw" style="background:#D92D20"></span>Standard&nbsp;&nbsp;&nbsp;<span class="sw" style="background:#F79009"></span>Additional charge';
-      return element;
+      legendElement=L.DomUtil.create('div','legend');
+      updateLegend();
+      return legendElement;
     };
     legend.addTo(map);
+    searchButton.disabled=true;
+    clearButton.disabled=true;
+    L.DomEvent.disableClickPropagation(searchPanel);
+    L.DomEvent.disableScrollPropagation(searchPanel);
+    panelToggle.addEventListener('click',()=>{
+      const collapsed=searchPanel.classList.toggle('collapsed');
+      panelToggle.textContent=collapsed?'+':'−';
+      panelToggle.title=collapsed?'展开':'收起';
+      panelToggle.setAttribute('aria-label',collapsed?'Expand search panel':'Collapse search panel');
+    });
+    searchButton.addEventListener('click',runBatchSearch);
+    clearButton.addEventListener('click',()=>resetSearch(true));
+    searchInput.addEventListener('input',updateInputCount);
+    searchInput.addEventListener('keydown',event=>{
+      if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){
+        event.preventDefault();
+        runBatchSearch();
+      }
+    });
+    updateInputCount();
     initialise();
   </script>
+  <script src="config.js?v=20260809-1"></script>
+  <script src="google-app.js?v=20260809-1"></script>
 </body>
 </html>
