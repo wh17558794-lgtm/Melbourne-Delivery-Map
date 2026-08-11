@@ -16,6 +16,8 @@
   const postcodeBatches=legacyJson('postcodeBatches');
   const localityZones={'ELTHAM':'Standard','ELTHAM NORTH':'Standard','RESEARCH':'Additional charge'};
   const staticMode=new URLSearchParams(location.search).has('static');
+  const roadIconMode=new URLSearchParams(location.search).get('road-icons')||'default';
+  const cloudMapId=String(window.GOOGLE_MAPS_MAP_ID||'').trim();
 
   const statusElement=document.getElementById('status');
   const searchPanel=document.getElementById('searchPanel');
@@ -26,6 +28,12 @@
   const clearButton=document.getElementById('clearButton');
   const boundaryToggleButton=document.getElementById('boundaryToggleButton');
   const boundaryToggleLabel=document.getElementById('boundaryToggleLabel');
+  const suburbTagToggleButton=document.getElementById('suburbTagToggleButton');
+  const suburbTagToggleLabel=document.getElementById('suburbTagToggleLabel');
+  const resultMarkButton=document.getElementById('resultMarkButton');
+  const resultMarkLabel=document.getElementById('resultMarkLabel');
+  const sheetImportButton=document.getElementById('sheetImportButton');
+  const sheetImportLabel=document.getElementById('sheetImportLabel');
   const searchResults=document.getElementById('searchResults');
   const searchProgress=document.getElementById('searchProgress');
   const searchProgressBar=searchProgress.querySelector('span');
@@ -41,13 +49,22 @@
   let map=null;
   let geocoder=null;
   let infoWindow=null;
+  let AdvancedMarkerElement=null;
+  let markerProjection=null;
   let defaultData=null;
   let suburbData=null;
   let defaultBounds=null;
   let suburbLoadPromise=null;
   let searchActive=false;
   let boundariesVisible=false;
+  let suburbTagsVisible=false;
   let infoOpen=false;
+  let sheetsTokenClient=null;
+  let sheetsAccessToken='';
+  let sheetsTokenResolve=null;
+  let sheetsTokenReject=null;
+
+  const SHEETS_READ_SCOPE='https://www.googleapis.com/auth/spreadsheets.readonly';
 
   searchButton.disabled=true;
   clearButton.disabled=true;
@@ -57,6 +74,137 @@
   function updateInputCount(){
     const count=searchInput.value.split(/\r?\n/).filter(line=>line.trim()).length;
     inputCount.textContent=`${count} 条`;
+  }
+
+  function sheetImportConfig(){
+    const raw=window.GOOGLE_SHEETS_IMPORT_CONFIG||{};
+    const spreadsheetInput=String(raw.spreadsheetId||'').trim();
+    const urlMatch=spreadsheetInput.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    return {
+      oauthClientId:String(raw.oauthClientId||'').trim(),
+      spreadsheetId:urlMatch?.[1]||spreadsheetInput,
+      range:String(raw.range||'').trim()
+    };
+  }
+
+  function missingSheetImportConfig(config){
+    const missing=[];
+    if(!config.oauthClientId) missing.push('Google OAuth Client ID');
+    if(!config.spreadsheetId) missing.push('Google Sheet 链接或 Spreadsheet ID');
+    if(!config.range) missing.push('页签和地址范围');
+    return missing;
+  }
+
+  function waitForGoogleIdentityServices(timeoutMs=8000){
+    if(window.google?.accounts?.oauth2) return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      const started=Date.now();
+      const timer=setInterval(()=>{
+        if(window.google?.accounts?.oauth2){
+          clearInterval(timer);
+          resolve();
+        }else if(Date.now()-started>=timeoutMs){
+          clearInterval(timer);
+          reject(new Error('Google 登录组件加载失败，请检查网络后刷新页面。'));
+        }
+      },100);
+    });
+  }
+
+  function initialiseSheetsTokenClient(config){
+    if(sheetsTokenClient) return sheetsTokenClient;
+    sheetsTokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:config.oauthClientId,
+      scope:SHEETS_READ_SCOPE,
+      callback:response=>{
+        if(response?.access_token){
+          sheetsAccessToken=response.access_token;
+          sheetsTokenResolve?.(response.access_token);
+        }else{
+          sheetsTokenReject?.(new Error(response?.error_description||response?.error||'Google 授权未完成。'));
+        }
+        sheetsTokenResolve=null;
+        sheetsTokenReject=null;
+      },
+      error_callback:error=>{
+        sheetsTokenReject?.(new Error(error?.message||error?.type||'Google 登录窗口已关闭。'));
+        sheetsTokenResolve=null;
+        sheetsTokenReject=null;
+      }
+    });
+    return sheetsTokenClient;
+  }
+
+  function requestSheetsAccessToken(config){
+    if(sheetsAccessToken) return Promise.resolve(sheetsAccessToken);
+    return new Promise((resolve,reject)=>{
+      sheetsTokenResolve=resolve;
+      sheetsTokenReject=reject;
+      initialiseSheetsTokenClient(config).requestAccessToken();
+    });
+  }
+
+  async function fetchSheetAddresses(config,accessToken){
+    const url='https://sheets.googleapis.com/v4/spreadsheets/'+
+      `${encodeURIComponent(config.spreadsheetId)}/values/${encodeURIComponent(config.range)}?`+
+      new URLSearchParams({majorDimension:'ROWS',valueRenderOption:'FORMATTED_VALUE'});
+    const response=await fetch(url,{headers:{Authorization:`Bearer ${accessToken}`}});
+    let payload={};
+    try{
+      payload=await response.json();
+    }catch(_error){
+      // The status below still produces a useful message for a non-JSON response.
+    }
+    if(!response.ok){
+      if(response.status===401) sheetsAccessToken='';
+      const detail=payload?.error?.message||`Google Sheets returned HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    return (payload.values||[])
+      .map(row=>String(row?.[0]??'').trim())
+      .filter(Boolean);
+  }
+
+  function setSheetImportBusy(busy){
+    if(!sheetImportButton||!sheetImportLabel) return;
+    sheetImportButton.disabled=busy;
+    sheetImportLabel.textContent=busy?'正在连接 Google Sheets...':'从 Google Sheets 导入';
+  }
+
+  async function importAddressesFromGoogleSheets(){
+    const config=sheetImportConfig();
+    const missing=missingSheetImportConfig(config);
+    if(missing.length){
+      setSearchResult(
+        `<b>Google Sheets 导入尚未配置。</b><br>还需要：${escapeHtml(missing.join('、'))}。`,
+        [],
+        true
+      );
+      return;
+    }
+    if(searchInput.value.trim()&&!window.confirm('导入会替换地址框内的现有内容，是否继续？')) return;
+
+    setSheetImportBusy(true);
+    setSearchResult('正在请求只读权限并读取 Google Sheet...');
+    try{
+      await waitForGoogleIdentityServices();
+      const accessToken=await requestSheetsAccessToken(config);
+      const addresses=await fetchSheetAddresses(config,accessToken);
+      if(!addresses.length) throw new Error(`指定范围 ${config.range} 中没有可导入的地址。`);
+      searchInput.value=addresses.join('\n');
+      searchInput.dispatchEvent(new Event('input',{bubbles:true}));
+      sheetImportButton?.classList.add('connected');
+      setSearchResult(
+        `<b>已从 Google Sheets 导入 ${addresses.length} 条地址。</b><br>`+
+        `来源：${escapeHtml(config.range)}。请检查地址后点击“查找并显示”。`
+      );
+      searchInput.focus();
+    }catch(error){
+      console.error(error);
+      setSearchResult(`Google Sheets 导入失败：${escapeHtml(error.message||'Unknown error')}`,[],true);
+    }finally{
+      setSheetImportBusy(false);
+    }
   }
 
   function normaliseText(value){
@@ -84,6 +232,51 @@
       .replaceAll('>','&gt;')
       .replaceAll('"','&quot;')
       .replaceAll("'",'&#039;');
+  }
+
+  function roadIconStyles(){
+    if(roadIconMode==='major'){
+      return [
+        {featureType:'road.arterial',elementType:'labels.icon',stylers:[{visibility:'off'}]},
+        {featureType:'road.local',elementType:'labels.icon',stylers:[{visibility:'off'}]}
+      ];
+    }
+    if(roadIconMode==='custom'){
+      return [{featureType:'road',elementType:'labels.icon',stylers:[{visibility:'off'}]}];
+    }
+    return [];
+  }
+
+  function googleMapOptions(){
+    const options={
+      center:{lat:-37.8136,lng:144.9631},
+      zoom:10,
+      mapTypeControl:false,
+      streetViewControl:false,
+      fullscreenControl:true,
+      gestureHandling:'greedy'
+    };
+
+    if(roadIconMode==='major'){
+      // Retain the old comparison mode. Embedded JSON styles are raster-only.
+      options.renderingType=google.maps.RenderingType.RASTER;
+      options.isFractionalZoomEnabled=false;
+      options.styles=roadIconStyles();
+      return options;
+    }
+
+    // The default map and option 2 both stay vector-based. This restores the
+    // normal fractional mouse-wheel zoom and keeps labels/roads crisp.
+    options.renderingType=google.maps.RenderingType.VECTOR;
+    options.isFractionalZoomEnabled=true;
+
+    if(roadIconMode==='custom'&&cloudMapId){
+      // Road shields and POI icons are controlled by the cloud style attached
+      // to this Map ID. Do not also pass the raster-only `styles` option.
+      options.mapId=cloudMapId;
+    }
+
+    return options;
   }
 
   async function loadLocalGeoJson(url,label){
@@ -148,14 +341,15 @@
   function suburbFeatureStyle(feature){
     const name=normaliseText(feature.getProperty('locality_name'));
     const selection=selectedSuburbs.get(name);
+    const marked=suburbHasMarkedResult(name);
     const showAll=!searchActive;
     return {
       clickable:showAll||Boolean(selection),
       visible:showAll||Boolean(selection),
-      strokeColor:selection?'#A66B00':'#475467',
+      strokeColor:selection?(marked?'#175CD3':'#A66B00'):'#475467',
       strokeOpacity:showAll||selection ? .9 : 0,
       strokeWeight:suburbBoundaryWeight(),
-      fillColor:selection?'#F2B134':'#FFFFFF',
+      fillColor:selection?(marked?'#38BDF8':'#F2B134'):'#FFFFFF',
       fillOpacity:selection ? .32 : .04
     };
   }
@@ -244,9 +438,10 @@
     suburbData.addListener('mouseover',event=>{
       const name=normaliseText(event.feature.getProperty('locality_name'));
       if(!searchActive||selectedSuburbs.has(name)){
+        const marked=suburbHasMarkedResult(name);
         suburbData.overrideStyle(event.feature,{
           fillOpacity:searchActive ? .45 : .12,
-          strokeColor:searchActive?'#7A4E00':'#344054'
+          strokeColor:searchActive?(marked?'#0C4A6E':'#7A4E00'):'#344054'
         });
       }
     });
@@ -418,11 +613,246 @@
     };
   }
 
+  function addressMarkerHtml(){
+    const element=document.createElement('div');
+    element.className='delivery-address-pin';
+    element.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40" aria-hidden="true"><path d="M14 1C6.82 1 1 6.82 1 14c0 10.18 13 25 13 25s13-14.82 13-25C27 6.82 21.18 1 14 1Z" fill="#EA4335" stroke="#FFFFFF" stroke-width="3.2"/><path d="M14 1C6.82 1 1 6.82 1 14c0 10.18 13 25 13 25s13-14.82 13-25C27 6.82 21.18 1 14 1Z" fill="#EA4335" stroke="#B3261E" stroke-width="1.2"/><circle cx="14" cy="14" r="5.5" fill="#B3261E"/></svg>';
+    return element;
+  }
+
+  function suburbLabelHtml(name){
+    const element=document.createElement('div');
+    element.className='delivery-suburb-label';
+    element.textContent=name;
+    return element;
+  }
+
+  const labelAnchors={
+    right:{left:'14px',top:'-28px'},
+    top:{left:'-50%',top:'calc(-100% - 36px)'},
+    left:{left:'calc(-100% - 14px)',top:'-28px'},
+    bottom:{left:'-50%',top:'8px'}
+  };
+
+  function setAddressLabelPlacement(record,placement){
+    const anchor=labelAnchors[placement]||labelAnchors.right;
+    record.placement=placement;
+    record.label.anchorLeft=anchor.left;
+    record.label.anchorTop=anchor.top;
+  }
+
+  function labelCandidateBox(point,width,height,placement){
+    if(placement==='top') return {left:point.x-width/2,top:point.y-height-36,right:point.x+width/2,bottom:point.y-36};
+    if(placement==='left') return {left:point.x-width-14,top:point.y-28,right:point.x-14,bottom:point.y-28+height};
+    if(placement==='bottom') return {left:point.x-width/2,top:point.y+8,right:point.x+width/2,bottom:point.y+8+height};
+    return {left:point.x+14,top:point.y-28,right:point.x+14+width,bottom:point.y-28+height};
+  }
+
+  function boxesOverlap(a,b,padding=5){
+    return !(a.right+padding<=b.left||a.left>=b.right+padding||a.bottom+padding<=b.top||a.top>=b.bottom+padding);
+  }
+
+  function layoutAddressLabels(){
+    if(!map||!markerProjection) return;
+    const projection=markerProjection.getProjection();
+    if(!projection) return;
+    const zoom=map.getZoom()||0;
+    const records=addressMarkers.filter(record=>record.kind==='advanced');
+    if(!suburbTagsVisible){
+      records.forEach(record=>{record.label.map=null});
+      return;
+    }
+    const showLabels=zoom>=10;
+    const mapDiv=map.getDiv();
+    const mapWidth=mapDiv.clientWidth;
+    const mapHeight=mapDiv.clientHeight;
+    const points=new Map();
+    records.forEach(record=>points.set(record,projection.fromLatLngToContainerPixel(new google.maps.LatLng(record.position))));
+    const pinBoxes=records.map(record=>{
+      const point=points.get(record);
+      return {record,left:point.x-13,top:point.y-34,right:point.x+13,bottom:point.y+4};
+    });
+    const occupied=[];
+
+    records.forEach((record,index)=>{
+      record.labelElement.classList.toggle('is-detailed',zoom>=14);
+      if(!showLabels&&!record.hovering){
+        record.label.map=null;
+        return;
+      }
+      const point=points.get(record);
+      const width=Math.min(190,Math.max(74,24+String(record.suburb).length*(zoom>=14?7.4:6.9)));
+      const height=zoom>=14?28:26;
+      let directions=['right','top','left','bottom'];
+      if(point.x>mapWidth*.72) directions=['left','top','bottom','right'];
+      else if(point.x<mapWidth*.28) directions=['right','top','bottom','left'];
+      else if(index%2) directions=['top','right','left','bottom'];
+      let chosen=null;
+      for(const direction of directions){
+        const box=labelCandidateBox(point,width,height,direction);
+        const within=box.left>=8&&box.top>=8&&box.right<=mapWidth-8&&box.bottom<=mapHeight-8;
+        const hitsLabel=occupied.some(other=>boxesOverlap(box,other));
+        const hitsPin=pinBoxes.some(other=>other.record!==record&&boxesOverlap(box,other,2));
+        if(within&&!hitsLabel&&!hitsPin){
+          chosen={direction,box};
+          break;
+        }
+      }
+      if(!chosen&&!record.hovering){
+        record.label.map=null;
+        return;
+      }
+      setAddressLabelPlacement(record,chosen?.direction||record.placement||'right');
+      record.label.map=map;
+      if(chosen) occupied.push(chosen.box);
+    });
+  }
+
+  function updateSuburbTagToggle(){
+    if(!suburbTagToggleButton||!suburbTagToggleLabel) return;
+    const available=addressMarkers.some(item=>item.kind==='advanced');
+    const active=available&&suburbTagsVisible;
+    suburbTagToggleButton.disabled=!available;
+    suburbTagToggleButton.classList.toggle('active',active);
+    suburbTagToggleButton.setAttribute('aria-pressed',String(active));
+    suburbTagToggleLabel.textContent=active?'隐藏 Suburb 名称':'显示 Suburb 名称';
+  }
+
+  function setSuburbTagsVisible(visible){
+    suburbTagsVisible=Boolean(visible);
+    if(!suburbTagsVisible){
+      addressMarkers.forEach(item=>{
+        if(item.kind==='advanced') item.label.map=null;
+      });
+    }
+    updateSuburbTagToggle();
+    requestAnimationFrame(layoutAddressLabels);
+  }
+
+  function suburbHasMarkedResult(name){
+    const suburbKey=normaliseText(name);
+    return addressMarkers.some(item=>item.kind==='advanced'&&item.marked&&item.suburbKey===suburbKey);
+  }
+
+  function updateAddressRecordAppearance(record){
+    if(record.kind!=='advanced') return;
+    record.pinElement.classList.toggle('is-marked',record.marked);
+    record.labelElement.classList.toggle('is-marked',record.marked);
+    record.pinElement.classList.toggle('is-pending',record.pending);
+    record.labelElement.classList.toggle('is-pending',record.pending);
+  }
+
+  function pendingAddressRecords(){
+    return addressMarkers.filter(item=>item.kind==='advanced'&&item.pending);
+  }
+
+  function updateResultMarkButton(){
+    if(!resultMarkButton||!resultMarkLabel) return;
+    const pending=pendingAddressRecords();
+    const unmark=pending.length>0&&pending.every(item=>item.marked);
+    resultMarkButton.disabled=pending.length===0;
+    resultMarkButton.classList.toggle('ready',pending.length>0);
+    resultMarkLabel.textContent=pending.length
+      ?`${unmark?'取消标记':'标记选中结果'} (${pending.length})`
+      :'标记选中结果';
+  }
+
+  function toggleAddressRecordSelection(record){
+    record.pending=!record.pending;
+    updateAddressRecordAppearance(record);
+    updateResultMarkButton();
+  }
+
+  function applyPendingAddressMarks(){
+    const pending=pendingAddressRecords();
+    if(!pending.length) return;
+    const shouldMark=pending.some(item=>!item.marked);
+    pending.forEach(record=>{
+      record.marked=shouldMark;
+      record.pending=false;
+      updateAddressRecordAppearance(record);
+    });
+    updateResultMarkButton();
+    suburbData?.setStyle(suburbFeatureStyle);
+    updateLegend();
+    requestAnimationFrame(layoutAddressLabels);
+  }
+
   function addAddressMarker(result){
     const [longitude,latitude]=result.feature.geometry.coordinates;
     const props=result.feature.properties;
+    const position={lat:latitude,lng:longitude};
+
+    if(AdvancedMarkerElement){
+      const pinElement=addressMarkerHtml();
+      const labelElement=suburbLabelHtml(props.locality_name);
+      const marker=new AdvancedMarkerElement({
+        position,
+        map,
+        content:pinElement,
+        title:`${result.lineNumber}. ${props.ezi_address}`,
+        zIndex:1000-result.lineNumber,
+        gmpClickable:true,
+        collisionBehavior:google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
+      });
+      const label=new AdvancedMarkerElement({
+        position,
+        map:null,
+        content:labelElement,
+        title:props.locality_name,
+        zIndex:900-result.lineNumber,
+        gmpClickable:true,
+        collisionBehavior:google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
+      });
+      const record={
+        kind:'advanced',
+        marker,
+        label,
+        pinElement,
+        labelElement,
+        position,
+        suburb:props.locality_name,
+        suburbKey:normaliseText(props.locality_name),
+        placement:'right',
+        hovering:false,
+        pending:false,
+        marked:false
+      };
+      setAddressLabelPlacement(record,'right');
+      const showInfo=()=>openInfo(
+        position,
+        `<b>${result.lineNumber}. ${escapeHtml(props.ezi_address)}</b><br>`+
+        `${escapeHtml(props.locality_name)} · ${escapeHtml(props.postcode||'No postcode')}<br>`
+      );
+      const handleResultClick=event=>{
+        event.preventDefault();
+        event.stopPropagation();
+        if(event.ctrlKey||event.metaKey){
+          closeInfo();
+          toggleAddressRecordSelection(record);
+          return;
+        }
+        showInfo();
+      };
+      pinElement.addEventListener('click',handleResultClick);
+      labelElement.addEventListener('click',handleResultClick);
+      const setHovering=value=>{
+        record.hovering=value;
+        layoutAddressLabels();
+      };
+      pinElement.addEventListener('mouseenter',()=>setHovering(true));
+      pinElement.addEventListener('mouseleave',()=>setHovering(false));
+      labelElement.addEventListener('mouseenter',()=>setHovering(true));
+      labelElement.addEventListener('mouseleave',()=>setHovering(false));
+      updateAddressRecordAppearance(record);
+      addressMarkers.push(record);
+      updateResultMarkButton();
+      requestAnimationFrame(layoutAddressLabels);
+      return;
+    }
+
     const marker=new google.maps.Marker({
-      position:{lat:latitude,lng:longitude},
+      position,
       map,
       zIndex:20,
       icon:markerIcon(),
@@ -438,11 +868,22 @@
   }
 
   function clearAddressMarkers(){
-    addressMarkers.splice(0).forEach(marker=>marker.setMap(null));
+    addressMarkers.splice(0).forEach(item=>{
+      if(item.kind==='advanced'){
+        item.marker.map=null;
+        item.label.map=null;
+      }else{
+        item.setMap(null);
+      }
+    });
+    updateResultMarkButton();
   }
 
   function updateAddressMarkerSizes(){
-    addressMarkers.forEach(marker=>marker.setIcon(markerIcon()));
+    addressMarkers.forEach(item=>{
+      if(item.kind!=='advanced') item.setIcon(markerIcon());
+    });
+    requestAnimationFrame(layoutAddressLabels);
   }
 
   function updateSearchProgress(completed,total){
@@ -469,9 +910,11 @@
   function updateLegend(){
     legendElement.hidden=false;
     if(searchActive){
+      const hasMarked=addressMarkers.some(item=>item.kind==='advanced'&&item.marked);
       legendElement.innerHTML=
         '<span class="sw" style="background:#F2B134"></span>Selected suburb&nbsp;&nbsp;'+
-        '<span class="sw" style="background:#EA4335;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Address';
+        '<span class="sw" style="background:#EA4335;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Address'+
+        (hasMarked?'&nbsp;&nbsp;<span class="sw" style="background:#38BDF8"></span>Marked suburb&nbsp;&nbsp;<span class="sw" style="background:#2F80ED;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Marked address':'');
     }else if(boundariesVisible){
       legendElement.innerHTML=
         '<span class="sw" style="background:#FFFFFF;border:1px solid #475467"></span>Suburb boundary';
@@ -514,7 +957,7 @@
 
   function fitSearchResults(){
     const bounds=new google.maps.LatLngBounds();
-    addressMarkers.forEach(marker=>bounds.extend(marker.getPosition()));
+    addressMarkers.forEach(item=>bounds.extend(item.kind==='advanced'?item.position:item.getPosition()));
     selectedSuburbs.forEach((_,name)=>{
       (suburbFeatures.get(name)||[]).forEach(feature=>geometryBounds(feature.getGeometry(),bounds));
     });
@@ -528,6 +971,7 @@
   function resetSearch(clearInput=true){
     selectedSuburbs.clear();
     clearAddressMarkers();
+    setSuburbTagsVisible(false);
     searchActive=false;
     boundariesVisible=false;
     defaultData?.setMap(null);
@@ -556,6 +1000,8 @@
     }
 
     if(boundariesVisible) setAllBoundariesVisible(false);
+    setSuburbTagsVisible(false);
+    if(suburbTagToggleButton) suburbTagToggleButton.disabled=true;
 
     searchButton.disabled=true;
     clearButton.disabled=true;
@@ -618,6 +1064,7 @@
       suburbData.setStyle(suburbFeatureStyle);
       fitSearchResults();
       updateAddressMarkerSizes();
+      updateSuburbTagToggle();
 
       const addressCount=results.filter(result=>result?.ok&&result.type==='address').length;
       const suburbCount=results.filter(result=>result?.ok&&result.type==='suburb').length;
@@ -690,18 +1137,20 @@
 
   async function initialise(){
     try{
-      map=new google.maps.Map(document.getElementById('map'),{
-        center:{lat:-37.8136,lng:144.9631},
-        zoom:10,
-        renderingType:google.maps.RenderingType.VECTOR,
-        isFractionalZoomEnabled:true,
-        mapTypeControl:false,
-        streetViewControl:false,
-        fullscreenControl:true,
-        gestureHandling:'greedy'
-      });
+      map=new google.maps.Map(document.getElementById('map'),googleMapOptions());
+      if(roadIconMode==='custom'&&!cloudMapId){
+        console.warn('Option 2 is using the normal vector basemap. Add GOOGLE_MAPS_MAP_ID in config.js to apply the cloud style that hides road numbers and POI icons.');
+      }
       geocoder=new google.maps.Geocoder();
       infoWindow=new google.maps.InfoWindow();
+      if(roadIconMode==='custom'&&cloudMapId){
+        ({AdvancedMarkerElement}=await google.maps.importLibrary('marker'));
+        markerProjection=new google.maps.OverlayView();
+        markerProjection.onAdd=()=>{};
+        markerProjection.draw=()=>requestAnimationFrame(layoutAddressLabels);
+        markerProjection.onRemove=()=>{};
+        markerProjection.setMap(map);
+      }
       infoWindow.addListener('closeclick',()=>{infoOpen=false});
       map.addListener('click',closeInfo);
       map.addListener('zoom_changed',()=>{
@@ -710,6 +1159,7 @@
         updateAddressMarkerSizes();
         updatePostcodeLabels();
       });
+      map.addListener('idle',()=>requestAnimationFrame(layoutAddressLabels));
 
       ensureSuburbLayer();
       await loadSuburbBoundaries();
@@ -718,8 +1168,14 @@
       if(defaultBounds&&!defaultBounds.isEmpty()) map.fitBounds(defaultBounds,35);
       updateBoundaryToggle();
       updateLegend();
-      statusElement.hidden=true;
-      statusElement.className='status';
+      if(roadIconMode==='custom'&&!cloudMapId){
+        statusElement.hidden=false;
+        statusElement.className='status';
+        statusElement.innerHTML='<strong>方案 2 已使用高清矢量地图</strong><br>请在 config.js 填入矢量 Map ID，云端样式才会隐藏道路编号与地点图标，并只保留机场。';
+      }else{
+        statusElement.hidden=true;
+        statusElement.className='status';
+      }
       searchButton.disabled=false;
       clearButton.disabled=false;
     }catch(error){
@@ -739,6 +1195,9 @@
   searchButton.addEventListener('click',runBatchSearch);
   clearButton.addEventListener('click',()=>resetSearch(true));
   boundaryToggleButton?.addEventListener('click',()=>setAllBoundariesVisible(!boundariesVisible));
+  suburbTagToggleButton?.addEventListener('click',()=>setSuburbTagsVisible(!suburbTagsVisible));
+  resultMarkButton?.addEventListener('click',applyPendingAddressMarks);
+  sheetImportButton?.addEventListener('click',importAddressesFromGoogleSheets);
   searchInput.addEventListener('input',updateInputCount);
   searchInput.addEventListener('keydown',event=>{
     if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){
@@ -747,5 +1206,7 @@
     }
   });
   updateInputCount();
+  updateSuburbTagToggle();
+  updateResultMarkButton();
   loadGoogleMaps();
 })();

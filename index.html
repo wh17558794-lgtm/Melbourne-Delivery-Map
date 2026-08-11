@@ -49,6 +49,18 @@
     .boundary-toggle:hover:not(:disabled){border-color:#c7952d!important;background:#fff7d6!important;box-shadow:0 4px 10px rgba(122,78,0,.12)!important}
     .boundary-toggle.active{border-color:#a66b00!important;background:#fef3c7!important;color:#664100!important;box-shadow:0 0 0 2px rgba(242,177,52,.18)!important}
     .boundary-toggle:disabled{cursor:not-allowed!important;opacity:.52}
+    .suburb-tag-toggle{width:100%;margin-top:9px;border-color:#cbd5e1!important;background:#fff!important;color:#334155!important;box-shadow:0 1px 3px rgba(15,23,42,.08)!important}
+    .suburb-tag-toggle:hover:not(:disabled){border-color:#93c5fd!important;background:#f8fbff!important;box-shadow:0 4px 10px rgba(37,99,235,.12)!important}
+    .suburb-tag-toggle.active{border-color:#2563eb!important;background:#eff6ff!important;color:#1d4ed8!important;box-shadow:0 0 0 2px rgba(37,99,235,.13)!important}
+    .suburb-tag-toggle:disabled{cursor:not-allowed!important;opacity:.52}
+    .result-mark-toggle{width:100%;margin-top:9px;border-color:#99c7e8!important;background:#f0f9ff!important;color:#075985!important;box-shadow:0 1px 3px rgba(14,116,144,.1)!important}
+    .result-mark-toggle:hover:not(:disabled){border-color:#38bdf8!important;background:#e0f2fe!important;box-shadow:0 4px 10px rgba(14,116,144,.16)!important}
+    .result-mark-toggle.ready{border-color:#0284c7!important;background:#e0f2fe!important;color:#075985!important;box-shadow:0 0 0 2px rgba(14,165,233,.15)!important}
+    .result-mark-toggle:disabled{cursor:not-allowed!important;opacity:.52}
+    .sheet-import-toggle{width:100%;margin-top:12px;border-color:#86c5a4!important;background:#f0fdf4!important;color:#166534!important;box-shadow:0 1px 3px rgba(22,101,52,.08)!important}
+    .sheet-import-toggle:hover:not(:disabled){border-color:#22c55e!important;background:#dcfce7!important;box-shadow:0 4px 10px rgba(22,101,52,.14)!important}
+    .sheet-import-toggle.connected{border-color:#16a34a!important;background:#dcfce7!important;color:#166534!important;box-shadow:0 0 0 2px rgba(34,197,94,.13)!important}
+    .sheet-import-toggle:disabled{cursor:wait!important;opacity:.62}
     .search-button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:9px 13px;border:1px solid transparent;border-radius:10px;background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 5px 12px rgba(37,99,235,.2);color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,background .16s ease}
     .search-button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .search-button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 16px rgba(37,99,235,.24)}
@@ -69,6 +81,18 @@
     .search-progress>span{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2563eb,#0ea5e9);transition:width .2s ease}
     .google-legend{position:absolute;z-index:1050;right:12px;bottom:28px}
     .postcode-label{color:#fff!important;font-size:10px!important;font-weight:700!important;text-shadow:-1px -1px 1px #344054,1px -1px 1px #344054,-1px 1px 1px #344054,1px 1px 1px #344054}
+    .delivery-address-pin{position:relative;width:21px;height:30px;cursor:pointer;filter:drop-shadow(0 2px 2px rgba(16,24,40,.28))}
+    .delivery-address-pin svg{display:block;width:21px;height:30px}
+    .delivery-address-pin.is-marked svg path:first-of-type{fill:#2f80ed}
+    .delivery-address-pin.is-marked svg path:nth-of-type(2){fill:#2f80ed;stroke:#175cd3}
+    .delivery-address-pin.is-marked svg circle{fill:#175cd3}
+    .delivery-address-pin.is-pending:after{content:'';position:absolute;left:-5px;top:-5px;width:29px;height:35px;border:2px solid #0ea5e9;border-radius:50% 50% 46% 46%;box-shadow:0 0 0 3px rgba(14,165,233,.16);pointer-events:none}
+    .delivery-suburb-label{box-sizing:border-box;padding:5px 9px;border:1px solid rgba(152,162,179,.72);border-radius:7px;background:rgba(255,255,255,.94);box-shadow:0 2px 7px rgba(16,24,40,.18);color:#27364b;font-family:Arial,sans-serif;font-size:12px;font-weight:600;line-height:15px;letter-spacing:.01em;white-space:nowrap;pointer-events:auto;cursor:pointer;backdrop-filter:blur(3px)}
+    .delivery-suburb-label:before{content:'';display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;background:#ea4335;box-shadow:0 0 0 1px rgba(179,38,30,.28);vertical-align:1px}
+    .delivery-suburb-label.is-marked{border-color:rgba(56,189,248,.82);background:rgba(239,249,255,.96);color:#075985;box-shadow:0 2px 8px rgba(14,116,144,.2)}
+    .delivery-suburb-label.is-marked:before{background:#2f80ed;box-shadow:0 0 0 1px rgba(23,92,211,.3)}
+    .delivery-suburb-label.is-pending{outline:2px solid rgba(14,165,233,.76);outline-offset:2px}
+    .delivery-suburb-label.is-detailed{font-size:13px;line-height:16px}
     .status.api-key-setup{top:50%;width:min(420px,calc(100vw - 44px));transform:translate(-50%,-50%);box-sizing:border-box;padding:18px;border:1px solid #bfdbfe;border-radius:14px;box-shadow:0 18px 48px rgba(15,23,42,.22);line-height:1.5}
     .api-key-setup strong{display:block;margin-bottom:5px;color:#0f172a;font-size:16px}
     .api-key-setup p{margin:0 0 11px;color:#64748b}
@@ -112,11 +136,14 @@
         <textarea class="search-input" id="searchInput" spellcheck="false" placeholder="例如：&#10;Glen Waverley&#10;21 Baker Parade, Ashburton VIC 3147&#10;8 Collins Street, Melbourne"></textarea>
         <div class="input-footer"><span>每行输入一个地址或 suburb</span><span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 查找</span></div>
       </div>
+      <button class="search-button secondary sheet-import-toggle" id="sheetImportButton" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h16v16H4Z"></path><path d="M4 9h16M9 4v16M14 4v16"></path></svg><span id="sheetImportLabel">从 Google Sheets 导入</span></button>
       <div class="search-actions">
         <button class="search-button" id="searchButton" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span>查找并显示</span></button>
         <button class="search-button secondary" id="clearButton" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path></svg><span>清空</span></button>
       </div>
       <button class="search-button secondary boundary-toggle" id="boundaryToggleButton" type="button" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z"></path><path d="M9 3v15M15 6v15"></path></svg><span id="boundaryToggleLabel">显示650个 Suburb 边界</span></button>
+      <button class="search-button secondary suburb-tag-toggle" id="suburbTagToggleButton" type="button" aria-pressed="false" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z"></path><path d="M8 9h8M8 12h5"></path></svg><span id="suburbTagToggleLabel">显示 Suburb 名称</span></button>
+      <button class="search-button secondary result-mark-toggle" id="resultMarkButton" type="button" disabled title="按住 Ctrl 点击水滴或 Tag 后进行标记"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 14 6 6L20 6"></path><path d="M4 6h7"></path></svg><span id="resultMarkLabel">标记选中结果</span></button>
       <div class="search-progress" id="searchProgress" hidden><span></span></div>
       <div class="search-results" id="searchResults" role="status" aria-live="polite"></div>
     </div>
@@ -1106,7 +1133,8 @@
     updateInputCount();
     initialise();
   </script>
-  <script src="config.js?v=20260809-1"></script>
-  <script src="google-app.js?v=20260809-1"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="config.js?v=20260810-1"></script>
+  <script src="google-app.js?v=20260810-7"></script>
 </body>
 </html>
