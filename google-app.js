@@ -16,7 +16,9 @@
   const postcodeBatches=legacyJson('postcodeBatches');
   const localityZones={'ELTHAM':'Standard','ELTHAM NORTH':'Standard','RESEARCH':'Additional charge'};
   const staticMode=new URLSearchParams(location.search).has('static');
-  const roadIconMode=new URLSearchParams(location.search).get('road-icons')||'default';
+  // The published site should use the cloud-styled, road-shield-free map by
+  // default. `?road-icons=default` remains available for comparison/testing.
+  const roadIconMode=new URLSearchParams(location.search).get('road-icons')||'custom';
   const cloudMapId=String(window.GOOGLE_MAPS_MAP_ID||'').trim();
 
   const statusElement=document.getElementById('status');
