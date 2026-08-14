@@ -1,8 +1,7 @@
 (function(){
   'use strict';
 
-  const LOCAL_AREA_URL='data/delivery-areas.geojson';
-  const LOCAL_SUBURB_URL='data/suburb-boundaries.geojson';
+  const LOCAL_AREA_URL='data/delivery-areas.geojson?v=20260814-3';
   const KEY_STORAGE='melbourne-delivery-google-maps-key';
   const legacyCode=document.getElementById('legacyLeafletCode')?.textContent||'';
 
@@ -15,6 +14,9 @@
   const zoneByPostcode=legacyJson('zoneByPostcode');
   const postcodeBatches=legacyJson('postcodeBatches');
   const localityZones={'ELTHAM':'Standard','ELTHAM NORTH':'Standard','RESEARCH':'Additional charge'};
+  const directSuburbMarkerOverrides={
+    MELBOURNE:{lat:-37.8136,lng:144.9631}
+  };
   const staticMode=new URLSearchParams(location.search).has('static');
   const layoutEditMode=new URLSearchParams(location.search).has('layout-edit');
   // The published site should use the cloud-styled, road-shield-free map by
@@ -45,9 +47,13 @@
   const selectedSuburbs=new Map();
   const suburbFeatures=new Map();
   const suburbZoneByName=new Map();
+  const postcodeSuburbs=new Map();
   const sessionGeocodeCache=new Map();
   const addressMarkers=[];
-  const postcodeLabels=[];
+  const directSuburbNames=new Set();
+  const suburbSearchMarkers=new Map();
+  const postcodeLabels=new Map();
+  const postcodeGroupColors={1:'#2563EB',2:'#16A34A',3:'#F59E0B',4:'#9333EA'};
 
   let map=null;
   let geocoder=null;
@@ -57,6 +63,7 @@
   let defaultData=null;
   let suburbData=null;
   let defaultBounds=null;
+  let areaLoadPromise=null;
   let suburbLoadPromise=null;
   let preciseScaleControl=null;
   let searchActive=false;
@@ -75,8 +82,21 @@
   if(boundaryToggleButton) boundaryToggleButton.disabled=true;
   if(staticMode) document.body.classList.add('static-map');
 
+  function parseSearchItems(value){
+    return String(value||'')
+      .split(/\r?\n/)
+      .flatMap(rawLine=>{
+        const line=rawLine.trim();
+        if(!line) return [];
+        const postcodeCandidates=line.split(/[\s,;，；、]+/).filter(Boolean);
+        const isPostcodeList=postcodeCandidates.length>0&&
+          postcodeCandidates.every(candidate=>/^3\d{3}$/.test(candidate));
+        return isPostcodeList?postcodeCandidates:[line];
+      });
+  }
+
   function updateInputCount(){
-    const count=searchInput.value.split(/\r?\n/).filter(line=>line.trim()).length;
+    const count=parseSearchItems(searchInput.value).length;
     inputCount.textContent=`${count} 条`;
   }
 
@@ -395,15 +415,25 @@
   }
 
   function loadAreas(){
-    return loadLocalGeoJson(LOCAL_AREA_URL,'配送边界');
+    if(!areaLoadPromise){
+      areaLoadPromise=loadLocalGeoJson(LOCAL_AREA_URL,'配送边界').catch(error=>{
+        areaLoadPromise=null;
+        throw error;
+      });
+    }
+    return areaLoadPromise;
   }
 
   function loadSuburbBoundaries(){
     if(!suburbLoadPromise){
-      suburbLoadPromise=loadLocalGeoJson(LOCAL_SUBURB_URL,'Suburb 边界')
+      suburbLoadPromise=loadAreas()
         .then(data=>{
-          registerSuburbGeoJson(data);
-          return data;
+          const suburbs={
+            type:'FeatureCollection',
+            features:data.features.filter(feature=>feature.properties?.boundary_type==='suburb')
+          };
+          registerSuburbGeoJson(suburbs);
+          return suburbs;
         })
         .catch(error=>{
           suburbLoadPromise=null;
@@ -430,14 +460,16 @@
   }
 
   function defaultFeatureStyle(feature){
+    const color=postcodeGroupColors[Number(feature.getProperty('group'))];
+    const visible=boundariesVisible&&Boolean(color);
     return {
-      clickable:true,
-      visible:!searchActive,
-      strokeColor:'#475467',
-      strokeOpacity:.78,
+      clickable:visible,
+      visible,
+      strokeColor:color||'#475467',
+      strokeOpacity:.9,
       strokeWeight:boundaryWeight(),
-      fillColor:'#FFFFFF',
-      fillOpacity:.04
+      fillColor:color||'#FFFFFF',
+      fillOpacity:.3
     };
   }
 
@@ -481,41 +513,161 @@
     return bounds;
   }
 
+  function collectionValues(collection){
+    if(!collection) return [];
+    if(typeof collection.getArray==='function') return collection.getArray();
+    return Array.from(collection);
+  }
+
+  function geometryPolygons(geometry){
+    if(!geometry||typeof geometry.getType!=='function') return [];
+    const type=geometry.getType();
+    if(type==='Polygon'){
+      const rings=collectionValues(geometry.getArray()).map(ring=>
+        collectionValues(ring.getArray()).map(latLng=>({lat:latLng.lat(),lng:latLng.lng()}))
+      );
+      return rings.length?[rings]:[];
+    }
+    if(type==='MultiPolygon'||type==='GeometryCollection'){
+      return collectionValues(geometry.getArray()).flatMap(geometryPolygons);
+    }
+    return [];
+  }
+
+  function ringAreaAndCentroid(ring){
+    let twiceArea=0;
+    let centroidLng=0;
+    let centroidLat=0;
+    for(let index=0,previous=ring.length-1;index<ring.length;previous=index++){
+      const first=ring[previous];
+      const second=ring[index];
+      const cross=first.lng*second.lat-second.lng*first.lat;
+      twiceArea+=cross;
+      centroidLng+=(first.lng+second.lng)*cross;
+      centroidLat+=(first.lat+second.lat)*cross;
+    }
+    if(Math.abs(twiceArea)<1e-12){
+      const fallback=ring[0]||null;
+      return {area:0,point:fallback};
+    }
+    return {
+      area:Math.abs(twiceArea)/2,
+      point:{lng:centroidLng/(3*twiceArea),lat:centroidLat/(3*twiceArea)}
+    };
+  }
+
+  function pointInRing(point,ring){
+    let inside=false;
+    for(let index=0,previous=ring.length-1;index<ring.length;previous=index++){
+      const first=ring[index];
+      const second=ring[previous];
+      const crosses=(first.lat>point.lat)!==(second.lat>point.lat);
+      if(crosses&&point.lng<(second.lng-first.lng)*(point.lat-first.lat)/(second.lat-first.lat)+first.lng){
+        inside=!inside;
+      }
+    }
+    return inside;
+  }
+
+  function pointInPolygon(point,rings){
+    return Boolean(rings[0]&&pointInRing(point,rings[0])&&
+      !rings.slice(1).some(ring=>pointInRing(point,ring)));
+  }
+
+  function squaredDistanceToSegment(point,first,second,longitudeScale){
+    const px=point.lng*longitudeScale;
+    const py=point.lat;
+    const ax=first.lng*longitudeScale;
+    const ay=first.lat;
+    const bx=second.lng*longitudeScale;
+    const by=second.lat;
+    const dx=bx-ax;
+    const dy=by-ay;
+    const lengthSquared=dx*dx+dy*dy;
+    const ratio=lengthSquared?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/lengthSquared)):0;
+    const offsetX=px-(ax+ratio*dx);
+    const offsetY=py-(ay+ratio*dy);
+    return offsetX*offsetX+offsetY*offsetY;
+  }
+
+  function interiorSamplePoint(rings){
+    const outer=rings[0]||[];
+    if(!outer.length) return null;
+    const latitudes=outer.map(point=>point.lat);
+    const longitudes=outer.map(point=>point.lng);
+    const minLat=Math.min(...latitudes);
+    const maxLat=Math.max(...latitudes);
+    const minLng=Math.min(...longitudes);
+    const maxLng=Math.max(...longitudes);
+    const longitudeScale=Math.cos(((minLat+maxLat)/2)*Math.PI/180);
+    let bestPoint=null;
+    let bestClearance=-1;
+    const steps=32;
+    for(let row=0;row<steps;row++){
+      for(let column=0;column<steps;column++){
+        const point={
+          lat:minLat+(row+.5)/steps*(maxLat-minLat),
+          lng:minLng+(column+.5)/steps*(maxLng-minLng)
+        };
+        if(!pointInPolygon(point,rings)) continue;
+        let clearance=Infinity;
+        rings.forEach(ring=>{
+          for(let index=0,previous=ring.length-1;index<ring.length;previous=index++){
+            clearance=Math.min(clearance,
+              squaredDistanceToSegment(point,ring[previous],ring[index],longitudeScale));
+          }
+        });
+        if(clearance>bestClearance){
+          bestClearance=clearance;
+          bestPoint=point;
+        }
+      }
+    }
+    return bestPoint||outer[0];
+  }
+
+  function suburbCenter(name){
+    const suburbKey=normaliseText(name);
+    const override=directSuburbMarkerOverrides[suburbKey];
+    if(override) return new google.maps.LatLng(override.lat,override.lng);
+    const polygons=(suburbFeatures.get(suburbKey)||[])
+      .flatMap(feature=>geometryPolygons(feature.getGeometry()));
+    if(!polygons.length) return null;
+    const largest=polygons
+      .map(rings=>({rings,centroid:ringAreaAndCentroid(rings[0])}))
+      .sort((first,second)=>second.centroid.area-first.centroid.area)[0];
+    const point=largest.centroid.point&&pointInPolygon(largest.centroid.point,largest.rings)
+      ?largest.centroid.point
+      :interiorSamplePoint(largest.rings);
+    return point?new google.maps.LatLng(point.lat,point.lng):null;
+  }
+
   function setupDefaultLayer(areas){
-    defaultData=new google.maps.Data({map});
+    defaultData=new google.maps.Data();
     const features=defaultData.addGeoJson(areas);
     defaultData.setStyle(defaultFeatureStyle);
     defaultData.addListener('click',event=>{
-      const postcode=event.feature.getProperty('postcode');
-      const suburb=event.feature.getProperty('suburb');
-      const zone=event.feature.getProperty('zone');
+      const postcode=String(event.feature.getProperty('postcode')||'');
+      const suburbs=event.feature.getProperty('suburbs')||[];
+      const group=event.feature.getProperty('group');
       openInfo(
         event.latLng,
-        `${suburb?`<b>${escapeHtml(suburb)}</b><br>`:''}${escapeHtml(zone)}`,
-        `Postcode ${postcode}`
+        `${searchActive?'':`V${escapeHtml(group)} · `}${escapeHtml(suburbs.join(', '))}`,
+        `Postcode ${escapeHtml(postcode)}`
       );
     });
     defaultData.addListener('mouseover',event=>{
-      defaultData.overrideStyle(event.feature,{fillOpacity:.64,strokeColor:'#344054'});
+      defaultData.overrideStyle(event.feature,{fillOpacity:.55,strokeWeight:boundaryWeight()+1});
     });
     defaultData.addListener('mouseout',event=>defaultData.revertStyle(event.feature));
 
     defaultBounds=new google.maps.LatLngBounds();
-    features.forEach(feature=>geometryBounds(feature.getGeometry(),defaultBounds));
-    createPostcodeLabels(features);
-  }
-
-  function createPostcodeLabels(features){
-    const seen=new Set();
     features.forEach(feature=>{
       const postcode=String(feature.getProperty('postcode')||'');
-      const suburb=feature.getProperty('suburb');
-      const showLabel=feature.getProperty('showLabel');
-      if(!postcode||seen.has(postcode)||(suburb&&!showLabel)) return;
-      seen.add(postcode);
+      geometryBounds(feature.getGeometry(),defaultBounds);
       const bounds=geometryBounds(feature.getGeometry());
-      if(bounds.isEmpty()) return;
-      const marker=new google.maps.Marker({
+      if(bounds.isEmpty()||postcodeLabels.has(postcode)) return;
+      postcodeLabels.set(postcode,new google.maps.Marker({
         position:bounds.getCenter(),
         map:null,
         clickable:false,
@@ -523,15 +675,16 @@
         zIndex:4,
         icon:{path:google.maps.SymbolPath.CIRCLE,scale:0},
         label:{text:postcode,color:'#ffffff',fontSize:'10px',fontWeight:'700',className:'postcode-label'}
-      });
-      postcodeLabels.push(marker);
+      }));
     });
-    updatePostcodeLabels();
   }
 
   function updatePostcodeLabels(){
-    const show=!searchActive&&(staticMode||(map?.getZoom()||0)>=12);
-    postcodeLabels.forEach(marker=>marker.setMap(show?map:null));
+    const zoomReady=staticMode||(map?.getZoom()||0)>=12;
+    postcodeLabels.forEach(marker=>{
+      const show=zoomReady&&boundariesVisible;
+      marker.setMap(show?map:null);
+    });
   }
 
   function ensureSuburbLayer(){
@@ -541,6 +694,10 @@
     suburbData.addListener('click',event=>{
       event.stop?.();
       const name=normaliseText(event.feature.getProperty('locality_name'));
+      if(searchActive&&directSuburbNames.has(name)){
+        openInfo(event.latLng,'',name);
+        return;
+      }
       const modifierPressed=Boolean(event.domEvent?.ctrlKey||event.domEvent?.metaKey);
       if(searchActive&&modifierPressed){
         const matchingAddresses=addressRecordsForSuburb(name);
@@ -575,7 +732,13 @@
       suburbFeatures.get(name).push(feature);
       const zone=feature.getProperty('zone');
       if(zone) suburbZoneByName.set(name,zone);
-      geometryBounds(feature.getGeometry(),defaultBounds);
+      const postcodes=feature.getProperty('delivery_postcodes');
+      (Array.isArray(postcodes)?postcodes:[postcodes]).filter(Boolean).forEach(postcode=>{
+        const key=String(postcode).trim();
+        if(!postcodeSuburbs.has(key)) postcodeSuburbs.set(key,new Set());
+        postcodeSuburbs.get(key).add(name);
+      });
+      if(!defaultData) geometryBounds(feature.getGeometry(),defaultBounds);
     });
     return added;
   }
@@ -616,6 +779,10 @@
   function isAddressInput(value){
     const query=normaliseText(value);
     return /^(?:(?:UNIT|SHOP|APT|APARTMENT|SUITE|FLAT|LEVEL)\b|U\s*\d|[A-Z]*\d)/.test(query);
+  }
+
+  function isPostcodeInput(value){
+    return /^3\d{3}$/.test(String(value||'').trim());
   }
 
   function addressComponent(result,type){
@@ -774,7 +941,10 @@
     const projection=markerProjection.getProjection();
     if(!projection) return;
     const zoom=map.getZoom()||0;
-    const records=addressMarkers.filter(record=>record.kind==='advanced');
+    const records=[
+      ...addressMarkers.filter(record=>record.kind==='advanced'),
+      ...[...suburbSearchMarkers.values()].filter(record=>record.kind==='suburb-advanced')
+    ];
     if(!suburbTagsVisible){
       records.forEach(record=>{record.label.map=null});
       return;
@@ -827,7 +997,7 @@
 
   function updateSuburbTagToggle(){
     if(!suburbTagToggleButton||!suburbTagToggleLabel) return;
-    const available=addressMarkers.some(item=>item.kind==='advanced');
+    const available=addressMarkers.length>0||suburbSearchMarkers.size>0;
     const active=available&&suburbTagsVisible;
     suburbTagToggleButton.disabled=!available;
     suburbTagToggleButton.classList.toggle('active',active);
@@ -837,11 +1007,18 @@
 
   function setSuburbTagsVisible(visible){
     suburbTagsVisible=Boolean(visible);
-    if(!suburbTagsVisible){
-      addressMarkers.forEach(item=>{
-        if(item.kind==='advanced') item.label.map=null;
-      });
-    }
+    addressMarkers.forEach(item=>{
+      if(item.kind==='advanced'){
+        item.marker.map=suburbTagsVisible?map:null;
+        if(!suburbTagsVisible) item.label.map=null;
+      }else item.setMap(suburbTagsVisible?map:null);
+    });
+    suburbSearchMarkers.forEach(item=>{
+      if(item.kind==='suburb-advanced'){
+        item.marker.map=suburbTagsVisible?map:null;
+        if(!suburbTagsVisible) item.label.map=null;
+      }else item.marker.setMap(suburbTagsVisible?map:null);
+    });
     updateSuburbTagToggle();
     requestAnimationFrame(layoutAddressLabels);
   }
@@ -1022,6 +1199,80 @@
     addressMarkers.push(marker);
   }
 
+  function addDirectSuburbMarker(result){
+    const name=normaliseText(result.suburbName);
+    if(!name||suburbSearchMarkers.has(name)) return;
+    const center=suburbCenter(name);
+    if(!center) return;
+    const position={lat:center.lat(),lng:center.lng()};
+    const showInfo=()=>openInfo(position,'',name);
+
+    if(AdvancedMarkerElement){
+      const pinElement=addressMarkerHtml();
+      const labelElement=suburbLabelHtml(name);
+      const marker=new AdvancedMarkerElement({
+        position,
+        map,
+        content:pinElement,
+        title:name,
+        zIndex:850-result.lineNumber,
+        gmpClickable:true,
+        collisionBehavior:google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
+      });
+      const label=new AdvancedMarkerElement({
+        position,
+        map:null,
+        content:labelElement,
+        title:name,
+        zIndex:800-result.lineNumber,
+        gmpClickable:true,
+        collisionBehavior:google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
+      });
+      const record={
+        kind:'suburb-advanced',
+        marker,
+        label,
+        pinElement,
+        labelElement,
+        position,
+        suburb:name,
+        suburbKey:name,
+        placement:'right',
+        hovering:false
+      };
+      setAddressLabelPlacement(record,'right');
+      const handleClick=event=>{
+        event.preventDefault();
+        event.stopPropagation();
+        showInfo();
+      };
+      pinElement.addEventListener('click',handleClick);
+      labelElement.addEventListener('click',handleClick);
+      const setHovering=value=>{
+        record.hovering=value;
+        layoutAddressLabels();
+      };
+      pinElement.addEventListener('mouseenter',()=>setHovering(true));
+      pinElement.addEventListener('mouseleave',()=>setHovering(false));
+      labelElement.addEventListener('mouseenter',()=>setHovering(true));
+      labelElement.addEventListener('mouseleave',()=>setHovering(false));
+      suburbSearchMarkers.set(name,record);
+      requestAnimationFrame(layoutAddressLabels);
+      return;
+    }
+
+    const marker=new google.maps.Marker({
+      position,
+      map,
+      zIndex:18,
+      icon:markerIcon(),
+      title:name,
+      label:{text:name,color:'#202124',fontSize:'12px',fontWeight:'500'}
+    });
+    marker.addListener('click',showInfo);
+    suburbSearchMarkers.set(name,{kind:'suburb-standard',marker,position});
+  }
+
   function clearAddressMarkers(){
     addressMarkers.splice(0).forEach(item=>{
       if(item.kind==='advanced'){
@@ -1031,12 +1282,25 @@
         item.setMap(null);
       }
     });
+    suburbSearchMarkers.forEach(item=>{
+      if(item.kind==='suburb-advanced'){
+        item.marker.map=null;
+        item.label.map=null;
+      }else{
+        item.marker.setMap(null);
+      }
+    });
+    suburbSearchMarkers.clear();
+    directSuburbNames.clear();
     updateResultMarkButton();
   }
 
   function updateAddressMarkerSizes(){
     addressMarkers.forEach(item=>{
       if(item.kind!=='advanced') item.setIcon(markerIcon());
+    });
+    suburbSearchMarkers.forEach(item=>{
+      if(item.kind==='suburb-standard') item.marker.setIcon(markerIcon());
     });
     requestAnimationFrame(layoutAddressLabels);
   }
@@ -1066,13 +1330,19 @@
     legendElement.hidden=false;
     if(searchActive){
       const hasMarked=addressMarkers.some(item=>item.kind==='advanced'&&item.marked);
+      const hasAddresses=addressMarkers.length>0;
+      const hasSuburbPoints=suburbSearchMarkers.size>0;
       legendElement.innerHTML=
-        '<span class="sw" style="background:#F2B134"></span>Selected suburb&nbsp;&nbsp;'+
-        '<span class="sw" style="background:#EA4335;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Address'+
+        (selectedSuburbs.size?'<span class="sw" style="background:#F2B134"></span>Selected suburb&nbsp;&nbsp;':'')+
+        (hasAddresses?'<span class="sw" style="background:#EA4335;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Address':'')+
+        (hasSuburbPoints?`${hasAddresses?'&nbsp;&nbsp;':''}<span class="sw" style="background:#EA4335;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Suburb center`:'')+
         (hasMarked?'&nbsp;&nbsp;<span class="sw" style="background:#38BDF8"></span>Marked suburb&nbsp;&nbsp;<span class="sw" style="background:#2F80ED;border-radius:50% 50% 50% 0;transform:rotate(-45deg)"></span>Marked address':'');
     }else if(boundariesVisible){
       legendElement.innerHTML=
-        '<span class="sw" style="background:#FFFFFF;border:1px solid #475467"></span>Suburb boundary';
+        '<span class="sw" style="background:#2563EB"></span>V1&nbsp;&nbsp;'+
+        '<span class="sw" style="background:#16A34A"></span>V2&nbsp;&nbsp;'+
+        '<span class="sw" style="background:#F59E0B"></span>V3&nbsp;&nbsp;'+
+        '<span class="sw" style="background:#9333EA"></span>V4';
     }else{
       legendElement.innerHTML='';
       legendElement.hidden=true;
@@ -1081,20 +1351,18 @@
 
   function updateBoundaryToggle(){
     if(!boundaryToggleButton||!boundaryToggleLabel) return;
-    const total=suburbFeatures.size||650;
-    boundaryToggleButton.disabled=!suburbData||searchActive;
+    boundaryToggleButton.disabled=!defaultData||searchActive;
     boundaryToggleButton.classList.toggle('active',boundariesVisible);
     boundaryToggleButton.setAttribute('aria-pressed',String(boundariesVisible));
-    boundaryToggleLabel.textContent=`${boundariesVisible?'隐藏':'显示'}${total}个 Suburb 边界`;
+    boundaryToggleLabel.textContent=`${boundariesVisible?'隐藏':'显示'} V1-V4 Postcode 区域`;
   }
 
   function setAllBoundariesVisible(visible){
     boundariesVisible=Boolean(visible)&&!searchActive;
-    if(suburbData){
-      suburbData.setMap(boundariesVisible?map:null);
-      suburbData.setStyle(suburbFeatureStyle);
-    }
+    defaultData?.setMap(boundariesVisible?map:null);
+    defaultData?.setStyle(defaultFeatureStyle);
     if(!boundariesVisible) closeInfo();
+    updatePostcodeLabels();
     updateBoundaryToggle();
     updateLegend();
   }
@@ -1103,6 +1371,7 @@
     searchActive=true;
     boundariesVisible=false;
     defaultData?.setMap(null);
+    defaultData?.setStyle(defaultFeatureStyle);
     suburbData?.setMap(map);
     suburbData?.setStyle(suburbFeatureStyle);
     updatePostcodeLabels();
@@ -1133,6 +1402,7 @@
     searchActive=false;
     boundariesVisible=false;
     defaultData?.setMap(null);
+    defaultData?.setStyle(defaultFeatureStyle);
     suburbData?.setMap(null);
     suburbData?.setStyle(suburbFeatureStyle);
     if(clearInput){
@@ -1151,9 +1421,9 @@
   }
 
   async function runBatchSearch(){
-    const lines=searchInput.value.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    const lines=parseSearchItems(searchInput.value);
     if(!lines.length){
-      setSearchResult('请先输入至少一个地址或 suburb。',[],true);
+      setSearchResult('请先输入至少一个地址、suburb 或邮编。',[],true);
       return;
     }
 
@@ -1166,14 +1436,14 @@
     if(boundaryToggleButton) boundaryToggleButton.disabled=true;
     searchProgressBar.style.width='0';
     searchProgress.hidden=false;
-    setSearchResult(`正在使用 Google 定位 ${lines.length} 条信息...`);
+    setSearchResult(`正在查找 ${lines.length} 条信息...`);
 
     try{
       selectedSuburbs.clear();
       clearAddressMarkers();
-      const addressItems=lines.map((input,index)=>({input,index})).filter(item=>isAddressInput(item.input));
-      const directSuburbNames=lines.filter(input=>!isAddressInput(input)).map(normaliseSuburbInput);
-      const directBoundaryRequest=ensureSuburbBoundaries(directSuburbNames);
+      const addressItems=lines.map((input,index)=>({input,index})).filter(item=>isAddressInput(item.input)&&!isPostcodeInput(item.input));
+      const requestedDirectSuburbNames=lines.filter(input=>!isAddressInput(input)&&!isPostcodeInput(input)).map(normaliseSuburbInput);
+      const directBoundaryRequest=ensureSuburbBoundaries(requestedDirectSuburbNames);
       const addressMatches=await geocodeAddressesBatch(addressItems);
       const addressSuburbNames=[...addressMatches.values()]
         .map(result=>result.match?.feature?.properties?.locality_name)
@@ -1183,6 +1453,17 @@
 
       const results=await mapWithConcurrency(lines,5,async(input,index)=>{
         const lineNumber=index+1;
+        if(isPostcodeInput(input)){
+          const names=[...(postcodeSuburbs.get(input)||[])].sort();
+          if(!names.length) return {ok:false,input,reason:'未找到此 Postcode 对应的 Suburb 边界'};
+          const suburbs=[];
+          for(const suburbName of names){
+            const zone=await getSuburbZone(suburbName);
+            mergeSuburbSelection(suburbName,zone,lineNumber);
+            suburbs.push({ok:true,type:'suburb',input,lineNumber,suburbName,zone});
+          }
+          return {ok:true,type:'postcode',input,lineNumber,suburbs};
+        }
         if(isAddressInput(input)){
           const batchResult=addressMatches.get(index);
           if(batchResult?.error) return {ok:false,input,reason:batchResult.error.message||'Google 地址查询失败'};
@@ -1219,13 +1500,24 @@
 
       showSearchMode();
       results.filter(result=>result?.ok&&result.type==='address').forEach(addAddressMarker);
+      const suburbResults=results.flatMap(result=>{
+        if(result?.ok&&result.type==='suburb') return [result];
+        if(result?.ok&&result.type==='postcode') return result.suburbs;
+        return [];
+      });
+      suburbResults.forEach(result=>{
+        directSuburbNames.add(normaliseText(result.suburbName));
+        addDirectSuburbMarker(result);
+      });
       suburbData.setStyle(suburbFeatureStyle);
+      defaultData.setStyle(defaultFeatureStyle);
       setSuburbTagsVisible(true);
+      updateLegend();
       fitSearchResults();
       updateAddressMarkerSizes();
 
       const addressCount=results.filter(result=>result?.ok&&result.type==='address').length;
-      const suburbCount=results.filter(result=>result?.ok&&result.type==='suburb').length;
+      const suburbCount=new Set(suburbResults.map(result=>normaliseText(result.suburbName))).size;
       const failures=results.filter(result=>!result?.ok);
       const notices=results.filter(result=>result?.notice);
       setSearchResult(
@@ -1235,8 +1527,8 @@
           `<div class="result-metric"><strong>${selectedSuburbs.size}</strong><span>高亮区域</span></div>`+
         '</div>',
         [
-          ...notices.map(result=>`${result.input} — ${result.notice}`),
-          ...failures.map(result=>`${result.input} — ${result.reason}`)
+          ...notices.map(result=>`${result.input}: ${result.notice}`),
+          ...failures.map(result=>`${result.input}: ${result.reason}`)
         ],
         failures.length===lines.length
       );
@@ -1328,6 +1620,13 @@
         updatePreciseScaleControl();
       });
 
+      const areas=await loadAreas();
+      setupDefaultLayer({
+        type:'FeatureCollection',
+        features:areas.features.filter(feature=>
+          feature.properties?.boundary_type==='postcode'&&postcodeGroupColors[Number(feature.properties.group)]
+        )
+      });
       ensureSuburbLayer();
       await loadSuburbBoundaries();
       suburbData.setMap(null);
